@@ -1,6 +1,7 @@
+
 /* =========================================================
    GLOBAL
-========================================================= */
+   ========================================================= */
 
 * {
   box-sizing: border-box;
@@ -11,7 +12,6 @@
   --orange-main: #ff6b00;
   --orange-light: #ff8a32;
   --orange-dark: #e85d00;
-
   --orange-soft: #fff1e6;
   --orange-border: #ffd2b3;
 
@@ -23,13 +23,13 @@
 
 /* =========================================================
    MAIN APP
-========================================================= */
+   ========================================================= */
 
 .app {
   position: relative;
 
-  min-height: 100vh;
   width: 100%;
+  min-height: 100vh;
 
   display: flex;
   align-items: center;
@@ -39,284 +39,20 @@
 
   overflow: hidden;
 
-  background:
-    linear-gradient(
-      135deg,
-      #fffdfb 0%,
-      #ffffff 42%,
-      #fffaf6 100%
-    );
-}
-
-
-/* =========================================================
-   AURORA BACKGROUND
-========================================================= */
-
-.aurora {
-  position: absolute;
-
-  pointer-events: none;
-
-  z-index: 0;
-
-  border-radius: 50%;
-
-  filter: blur(28px);
-
-  will-change: transform;
-}
-
-
-/* =========================================================
-   TOP LEFT AURORA
-========================================================= */
-
-.aurora-one {
-  width: 850px;
-  height: 280px;
-
-  left: -260px;
-  top: -40px;
-
-  background:
-    radial-gradient(
-      ellipse at center,
-      rgba(255, 107, 0, 0.48) 0%,
-      rgba(255, 126, 30, 0.34) 28%,
-      rgba(255, 166, 91, 0.20) 48%,
-      transparent 72%
-    );
-
-  transform: rotate(-8deg);
-
-  opacity: 0.85;
-
-  animation:
-    auroraTop 24s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   RIGHT AURORA
-========================================================= */
-
-.aurora-two {
-  width: 900px;
-  height: 340px;
-
-  right: -400px;
-  top: 30%;
-
-  background:
-    radial-gradient(
-      ellipse at center,
-      rgba(255, 107, 0, 0.58) 0%,
-      rgba(255, 126, 30, 0.40) 25%,
-      rgba(255, 167, 92, 0.22) 48%,
-      transparent 72%
-    );
-
-  transform: rotate(-28deg);
-
-  opacity: 0.9;
-
-  animation:
-    auroraRight 28s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   BOTTOM LEFT AURORA
-========================================================= */
-
-.aurora-three {
-  width: 1000px;
-  height: 330px;
-
-  left: -330px;
-  bottom: -80px;
-
-  background:
-    radial-gradient(
-      ellipse at center,
-      rgba(255, 107, 0, 0.52) 0%,
-      rgba(255, 126, 30, 0.36) 28%,
-      rgba(255, 171, 99, 0.20) 50%,
-      transparent 74%
-    );
-
-  transform: rotate(12deg);
-
-  opacity: 0.82;
-
-  animation:
-    auroraBottom 26s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   AURORA RIBBON / LIGHT LINES
-========================================================= */
-
-.aurora-line {
-  position: absolute;
-
-  pointer-events: none;
-
-  z-index: 1;
-
-  border-radius: 50%;
-
-  background: transparent;
-
-  filter: blur(0.4px);
-
-  will-change: transform;
-}
-
-
-/* =========================================================
-   TOP LEFT RIBBON
-========================================================= */
-
-.aurora-line-one {
-  width: 1050px;
-  height: 260px;
-
-  left: -350px;
-  top: -35px;
-
-  border-top:
-    2px solid rgba(255, 255, 255, 0.88);
-
-  border-bottom:
-    1px solid rgba(255, 125, 35, 0.20);
-
-  transform: rotate(-7deg);
-
-  box-shadow:
-    0 -5px 15px
-      rgba(255, 255, 255, 0.42),
-
-    0 8px 20px
-      rgba(255, 107, 0, 0.08);
-
-  animation:
-    ribbonTop 25s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   BOTTOM RIGHT RIBBON
-========================================================= */
-
-.aurora-line-two {
-  width: 1100px;
-  height: 320px;
-
-  right: -470px;
-  bottom: -20px;
-
-  border-top:
-    2px solid rgba(255, 255, 255, 0.82);
-
-  border-bottom:
-    1px solid rgba(255, 125, 35, 0.18);
-
-  transform: rotate(-18deg);
-
-  box-shadow:
-    0 -5px 18px
-      rgba(255, 255, 255, 0.40),
-
-    0 10px 25px
-      rgba(255, 107, 0, 0.08);
-
-  animation:
-    ribbonBottom 30s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   EXTRA BOTTOM GLOW
-========================================================= */
-
-.app::before {
-  content: "";
-
-  position: absolute;
-
-  width: 900px;
-  height: 450px;
-
-  left: -420px;
-  bottom: -230px;
-
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      ellipse,
-      rgba(255, 107, 0, 0.30) 0%,
-      rgba(255, 139, 61, 0.18) 35%,
-      transparent 70%
-    );
-
-  filter: blur(35px);
-
-  pointer-events: none;
-
-  z-index: 0;
-
-  animation:
-    bottomGlow 27s ease-in-out infinite;
-}
-
-
-/* =========================================================
-   EXTRA TOP RIGHT GLOW
-========================================================= */
-
-.app::after {
-  content: "";
-
-  position: absolute;
-
-  width: 650px;
-  height: 500px;
-
-  right: -260px;
-  top: -150px;
-
-  border-radius: 50%;
-
-  background:
-    radial-gradient(
-      ellipse,
-      rgba(255, 139, 61, 0.28) 0%,
-      rgba(255, 183, 119, 0.14) 38%,
-      transparent 72%
-    );
-
-  filter: blur(38px);
-
-  pointer-events: none;
-
-  z-index: 0;
-
-  animation:
-    topRightGlow 32s ease-in-out infinite;
+  background-color: #fffaf6;
+  background-image: url("/abstract-orange-bg.png");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
 }
 
 
 /* =========================================================
    MAIN CARD
-========================================================= */
+   ========================================================= */
 
 .card {
   position: relative;
-
   z-index: 2;
 
   width: 100%;
@@ -324,32 +60,41 @@
 
   padding: 42px;
 
-  background:
-    rgba(255, 255, 255, 0.88);
+  background: rgba(255, 255, 255, 0.97);
 
-  border:
-    1px solid rgba(255, 107, 0, 0.18);
+  border: 1px solid rgba(255, 107, 0, 0.16);
 
   border-radius: 22px;
 
   box-shadow:
-    0 20px 70px
-      rgba(255, 107, 0, 0.10),
+    0 20px 60px rgba(255, 107, 0, 0.08),
+    0 8px 28px rgba(0, 0, 0, 0.06);
 
-    0 8px 30px
-      rgba(0, 0, 0, 0.07);
+  /*
+    Subtle card interaction.
+    Tidak menggunakan backdrop-filter agar tetap ringan.
+  */
+  transition:
+    transform 0.25s ease,
+    box-shadow 0.25s ease,
+    border-color 0.25s ease;
+}
 
-  backdrop-filter: blur(18px);
-  -webkit-backdrop-filter: blur(18px);
+.card:hover {
+  transform: translateY(-2px);
 
-  animation:
-    cardEnter 0.8s ease-out;
+  border-color:
+    rgba(255, 107, 0, 0.22);
+
+  box-shadow:
+    0 25px 70px rgba(255, 107, 0, 0.11),
+    0 10px 32px rgba(0, 0, 0, 0.07);
 }
 
 
 /* =========================================================
    HEADER
-========================================================= */
+   ========================================================= */
 
 .header {
   display: flex;
@@ -363,7 +108,7 @@
 
 /* =========================================================
    BRAND ICON
-========================================================= */
+   ========================================================= */
 
 .brand-icon {
   position: relative;
@@ -372,6 +117,9 @@
   height: 54px;
 
   flex-shrink: 0;
+
+  transition:
+    transform 0.25s ease;
 }
 
 .brand-icon span {
@@ -390,6 +138,10 @@
     5px 18px 5px 18px;
 
   transform: rotate(45deg);
+
+  transition:
+    transform 0.25s ease,
+    opacity 0.25s ease;
 }
 
 .brand-icon span:first-child {
@@ -410,10 +162,26 @@
   opacity: 0.9;
 }
 
+.card:hover .brand-icon {
+  transform: translateY(-1px);
+}
+
+.card:hover .brand-icon span:first-child {
+  transform:
+    rotate(45deg)
+    translateY(-1px);
+}
+
+.card:hover .brand-icon span:last-child {
+  transform:
+    rotate(45deg)
+    translateY(1px);
+}
+
 
 /* =========================================================
    TITLE
-========================================================= */
+   ========================================================= */
 
 .header h1 {
   margin: 0;
@@ -443,11 +211,10 @@
 
 /* =========================================================
    DESCRIPTION
-========================================================= */
+   ========================================================= */
 
 .description {
   margin-left: 70px;
-
   margin-bottom: 30px;
 
   color: #858c97;
@@ -459,7 +226,7 @@
 
 /* =========================================================
    FORM GROUP
-========================================================= */
+   ========================================================= */
 
 .form-group {
   display: flex;
@@ -485,7 +252,7 @@
 
 /* =========================================================
    LABEL ICON
-========================================================= */
+   ========================================================= */
 
 .label-icon {
   width: 27px;
@@ -497,18 +264,31 @@
 
   border-radius: 8px;
 
-  background:
-    var(--orange-soft);
+  background: var(--orange-soft);
 
   color: var(--orange);
 
   font-size: 17px;
+
+  transition:
+    transform 0.2s ease,
+    background 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.form-group:hover .label-icon {
+  transform: scale(1.06);
+
+  background: #ffe9d8;
+
+  box-shadow:
+    0 4px 10px rgba(255, 107, 0, 0.10);
 }
 
 
 /* =========================================================
    UPLOAD AREA
-========================================================= */
+   ========================================================= */
 
 .upload-area {
   position: relative;
@@ -526,39 +306,35 @@
 
   border-radius: 12px;
 
-  background:
-    rgba(255, 255, 255, 0.72);
+  background: #ffffff;
 
   cursor: pointer;
 
   transition:
-    border-color 0.3s ease,
-    background 0.3s ease,
-    box-shadow 0.3s ease,
-    transform 0.2s ease;
+    transform 0.22s ease,
+    border-color 0.22s ease,
+    background 0.22s ease,
+    box-shadow 0.22s ease;
 }
 
 .upload-area:hover {
-  border-color:
-    rgba(255, 107, 0, 0.55);
+  transform: translateY(-2px);
 
-  background:
-    rgba(255, 247, 240, 0.92);
+  border-color:
+    rgba(255, 107, 0, 0.52);
+
+  background: #fffaf6;
 
   box-shadow:
-    0 5px 20px
-      rgba(255, 107, 0, 0.08);
-
-  transform:
-    translateY(-1px);
+    0 7px 20px
+      rgba(255, 107, 0, 0.09);
 }
 
 .upload-area.has-file {
   border-color:
     rgba(255, 107, 0, 0.35);
 
-  background:
-    rgba(255, 249, 245, 0.90);
+  background: #fffaf7;
 }
 
 .upload-area input {
@@ -568,7 +344,7 @@
 
 /* =========================================================
    UPLOAD CONTENT
-========================================================= */
+   ========================================================= */
 
 .upload-content {
   width: 100%;
@@ -582,7 +358,7 @@
 
 /* =========================================================
    UPLOAD ICON
-========================================================= */
+   ========================================================= */
 
 .upload-icon {
   width: 42px;
@@ -607,12 +383,26 @@
 
   font-size: 24px;
   font-weight: 500;
+
+  transition:
+    transform 0.22s ease,
+    box-shadow 0.22s ease;
+}
+
+.upload-area:hover .upload-icon {
+  transform:
+    translateY(-1px)
+    scale(1.05);
+
+  box-shadow:
+    0 5px 12px
+      rgba(255, 107, 0, 0.10);
 }
 
 
 /* =========================================================
    UPLOAD TEXT
-========================================================= */
+   ========================================================= */
 
 .upload-text {
   display: flex;
@@ -628,6 +418,9 @@
 
   font-size: 14px;
   font-weight: 600;
+
+  transition:
+    color 0.2s ease;
 }
 
 .upload-text small {
@@ -639,7 +432,7 @@
 
 /* =========================================================
    DOCUMENT ICON
-========================================================= */
+   ========================================================= */
 
 .document-icon {
   color: var(--orange);
@@ -647,12 +440,20 @@
   font-size: 27px;
 
   opacity: 0.9;
+
+  transition:
+    transform 0.22s ease;
+}
+
+.upload-area:hover .document-icon {
+  transform:
+    translateX(3px);
 }
 
 
 /* =========================================================
    SELECTED FILE
-========================================================= */
+   ========================================================= */
 
 .selected-file {
   width: 100%;
@@ -663,13 +464,13 @@
   gap: 13px;
 
   animation:
-    selectedFile 0.35s ease-out;
+    selectedFile 0.3s ease-out;
 }
 
 
 /* =========================================================
    EXCEL ICON
-========================================================= */
+   ========================================================= */
 
 .excel-icon {
   width: 42px;
@@ -694,12 +495,24 @@
 
   font-size: 10px;
   font-weight: 800;
+
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.upload-area:hover .excel-icon {
+  transform: scale(1.04);
+
+  box-shadow:
+    0 4px 10px
+      rgba(255, 107, 0, 0.08);
 }
 
 
 /* =========================================================
    FILE INFO
-========================================================= */
+   ========================================================= */
 
 .file-info {
   min-width: 0;
@@ -733,7 +546,7 @@
 
 /* =========================================================
    FILE CHECK
-========================================================= */
+   ========================================================= */
 
 .file-check {
   width: 27px;
@@ -753,16 +566,30 @@
   font-weight: 700;
 
   box-shadow:
-    0 3px 10px
+    0 3px 8px
+      rgba(22, 163, 106, 0.15);
+
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.upload-area:hover .file-check {
+  transform: scale(1.07);
+
+  box-shadow:
+    0 5px 12px
       rgba(22, 163, 106, 0.20);
 }
 
 
 /* =========================================================
    GENERATE BUTTON
-========================================================= */
+   ========================================================= */
 
 .generate-button {
+  position: relative;
+
   width: 100%;
   min-height: 50px;
 
@@ -774,8 +601,9 @@
 
   margin-top: 7px;
 
-  border: none;
+  overflow: hidden;
 
+  border: none;
   border-radius: 11px;
 
   background:
@@ -795,13 +623,52 @@
 
   box-shadow:
     0 7px 20px
-      rgba(255, 107, 0, 0.25);
+      rgba(255, 107, 0, 0.24);
 
   transition:
-    transform 0.2s ease,
-    box-shadow 0.25s ease,
-    filter 0.25s ease;
+    transform 0.20s ease,
+    box-shadow 0.20s ease,
+    filter 0.20s ease;
 }
+
+
+/* =========================================================
+   BUTTON SHIMMER
+   ========================================================= */
+
+.generate-button::before {
+  content: "";
+
+  position: absolute;
+
+  top: 0;
+  left: -120%;
+
+  width: 70%;
+  height: 100%;
+
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.22),
+      transparent
+    );
+
+  transform: skewX(-20deg);
+
+  pointer-events: none;
+}
+
+.generate-button:hover:not(:disabled)::before {
+  animation:
+    buttonShimmer 0.65s ease-out;
+}
+
+
+/* =========================================================
+   BUTTON HOVER
+   ========================================================= */
 
 .generate-button:hover:not(:disabled) {
   transform:
@@ -811,8 +678,8 @@
     brightness(1.04);
 
   box-shadow:
-    0 10px 28px
-      rgba(255, 107, 0, 0.32);
+    0 11px 28px
+      rgba(255, 107, 0, 0.30);
 }
 
 .generate-button:active:not(:disabled) {
@@ -821,7 +688,7 @@
 
   box-shadow:
     0 4px 12px
-      rgba(255, 107, 0, 0.22);
+      rgba(255, 107, 0, 0.20);
 }
 
 .generate-button:disabled {
@@ -841,29 +708,59 @@
 
 
 /* =========================================================
-   BUTTON ICONS
-========================================================= */
+   BUTTON SHIMMER ANIMATION
+   ========================================================= */
 
-.sparkle {
-  font-size: 18px;
+@keyframes buttonShimmer {
+  from {
+    left: -120%;
+  }
+
+  to {
+    left: 150%;
+  }
 }
 
-.arrow {
-  font-size: 19px;
+
+/* =========================================================
+   BUTTON ICONS
+   ========================================================= */
+
+.sparkle {
+  position: relative;
+  z-index: 1;
+
+  font-size: 18px;
 
   transition:
     transform 0.2s ease;
 }
 
-.generate-button:hover .arrow {
+.arrow {
+  position: relative;
+  z-index: 1;
+
+  font-size: 19px;
+
+  transition:
+    transform 0.20s ease;
+}
+
+.generate-button:hover:not(:disabled) .sparkle {
   transform:
-    translateX(3px);
+    rotate(12deg)
+    scale(1.08);
+}
+
+.generate-button:hover:not(:disabled) .arrow {
+  transform:
+    translateX(4px);
 }
 
 
 /* =========================================================
    RESET BUTTON
-========================================================= */
+   ========================================================= */
 
 .reset-button {
   width: 100%;
@@ -887,22 +784,36 @@
   cursor: pointer;
 
   transition:
-    background 0.2s ease,
-    border-color 0.2s ease;
+    transform 0.20s ease,
+    background 0.20s ease,
+    border-color 0.20s ease,
+    box-shadow 0.20s ease;
 }
 
 .reset-button:hover {
+  transform:
+    translateY(-1px);
+
   background:
     var(--orange-soft);
 
   border-color:
     rgba(255, 107, 0, 0.40);
+
+  box-shadow:
+    0 5px 14px
+      rgba(255, 107, 0, 0.07);
+}
+
+.reset-button:active {
+  transform:
+    translateY(0);
 }
 
 
 /* =========================================================
    STATUS
-========================================================= */
+   ========================================================= */
 
 .status {
   display: flex;
@@ -917,7 +828,7 @@
   border-radius: 10px;
 
   animation:
-    statusEnter 0.35s ease-out;
+    statusEnter 0.3s ease-out;
 }
 
 .status > div {
@@ -938,7 +849,7 @@
 
 /* =========================================================
    LOADING
-========================================================= */
+   ========================================================= */
 
 .status.loading {
   background: #fff7f0;
@@ -952,7 +863,7 @@
 
 /* =========================================================
    SUCCESS
-========================================================= */
+   ========================================================= */
 
 .status.success {
   background: #f0fdf7;
@@ -966,7 +877,7 @@
 
 /* =========================================================
    ERROR
-========================================================= */
+   ========================================================= */
 
 .status.error {
   background: #fff5f3;
@@ -980,7 +891,7 @@
 
 /* =========================================================
    STATUS CHECK
-========================================================= */
+   ========================================================= */
 
 .status-check {
   width: 27px;
@@ -997,12 +908,20 @@
   background: #ffffff;
 
   font-weight: 700;
+
+  transition:
+    transform 0.2s ease;
+}
+
+.status:hover .status-check {
+  transform:
+    scale(1.06);
 }
 
 
 /* =========================================================
    SPINNERS
-========================================================= */
+   ========================================================= */
 
 .status-spinner {
   width: 22px;
@@ -1041,7 +960,7 @@
 
 /* =========================================================
    FOOTER
-========================================================= */
+   ========================================================= */
 
 .footer {
   display: flex;
@@ -1061,217 +980,29 @@
   color: var(--orange);
 
   font-size: 13px;
+
+  transition:
+    transform 0.2s ease;
 }
 
-
-/* =========================================================
-   AURORA ANIMATIONS
-   Semakin besar angka detik = semakin lambat
-========================================================= */
-
-@keyframes auroraTop {
-  0% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-8deg)
-      scale(1);
-  }
-
-  25% {
-    transform:
-      translate3d(90px, 35px, 0)
-      rotate(-4deg)
-      scale(1.05);
-  }
-
-  50% {
-    transform:
-      translate3d(160px, 80px, 0)
-      rotate(-10deg)
-      scale(0.96);
-  }
-
-  75% {
-    transform:
-      translate3d(60px, 40px, 0)
-      rotate(-13deg)
-      scale(1.04);
-  }
-
-  100% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-8deg)
-      scale(1);
-  }
-}
-
-
-@keyframes auroraRight {
-  0% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-28deg)
-      scale(1);
-  }
-
-  30% {
-    transform:
-      translate3d(-80px, 50px, 0)
-      rotate(-24deg)
-      scale(1.05);
-  }
-
-  60% {
-    transform:
-      translate3d(-150px, -30px, 0)
-      rotate(-32deg)
-      scale(0.95);
-  }
-
-  100% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-28deg)
-      scale(1);
-  }
-}
-
-
-@keyframes auroraBottom {
-  0% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(12deg)
-      scale(1);
-  }
-
-  30% {
-    transform:
-      translate3d(120px, -40px, 0)
-      rotate(7deg)
-      scale(1.08);
-  }
-
-  65% {
-    transform:
-      translate3d(220px, -90px, 0)
-      rotate(16deg)
-      scale(0.95);
-  }
-
-  100% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(12deg)
-      scale(1);
-  }
-}
-
-
-/* =========================================================
-   RIBBON ANIMATIONS
-========================================================= */
-
-@keyframes ribbonTop {
-  0% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-7deg);
-  }
-
-  50% {
-    transform:
-      translate3d(120px, 55px, 0)
-      rotate(-3deg);
-  }
-
-  100% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-7deg);
-  }
-}
-
-
-@keyframes ribbonBottom {
-  0% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-18deg);
-  }
-
-  50% {
-    transform:
-      translate3d(-130px, -70px, 0)
-      rotate(-12deg);
-  }
-
-  100% {
-    transform:
-      translate3d(0, 0, 0)
-      rotate(-18deg);
-  }
-}
-
-
-/* =========================================================
-   EXTRA GLOW ANIMATIONS
-========================================================= */
-
-@keyframes bottomGlow {
-  0% {
-    transform:
-      translate3d(0, 0, 0)
-      scale(1);
-  }
-
-  50% {
-    transform:
-      translate3d(150px, -40px, 0)
-      scale(1.12);
-  }
-
-  100% {
-    transform:
-      translate3d(0, 0, 0)
-      scale(1);
-  }
-}
-
-
-@keyframes topRightGlow {
-  0% {
-    transform:
-      translate3d(0, 0, 0)
-      scale(1);
-  }
-
-  50% {
-    transform:
-      translate3d(-80px, 100px, 0)
-      scale(1.08);
-  }
-
-  100% {
-    transform:
-      translate3d(0, 0, 0)
-      scale(1);
-  }
+.footer:hover span {
+  transform:
+    rotate(15deg)
+    scale(1.08);
 }
 
 
 /* =========================================================
    CARD ENTRANCE
-========================================================= */
+   ========================================================= */
 
 @keyframes cardEnter {
   from {
     opacity: 0;
 
     transform:
-      translateY(25px)
-      scale(0.97);
+      translateY(20px)
+      scale(0.98);
   }
 
   to {
@@ -1286,14 +1017,14 @@
 
 /* =========================================================
    FILE ANIMATION
-========================================================= */
+   ========================================================= */
 
 @keyframes selectedFile {
   from {
     opacity: 0;
 
     transform:
-      translateX(-8px);
+      translateX(-6px);
   }
 
   to {
@@ -1307,14 +1038,14 @@
 
 /* =========================================================
    STATUS ANIMATION
-========================================================= */
+   ========================================================= */
 
 @keyframes statusEnter {
   from {
     opacity: 0;
 
     transform:
-      translateY(-5px);
+      translateY(-4px);
   }
 
   to {
@@ -1328,7 +1059,7 @@
 
 /* =========================================================
    SPIN
-========================================================= */
+   ========================================================= */
 
 @keyframes spin {
   to {
@@ -1340,12 +1071,15 @@
 
 /* =========================================================
    RESPONSIVE
-========================================================= */
+   ========================================================= */
 
 @media (max-width: 640px) {
   .app {
     padding:
       25px 15px;
+
+    background-position:
+      center center;
   }
 
   .card {
@@ -1365,43 +1099,94 @@
     margin-left:
       0;
   }
+}
 
-  .aurora {
+
+/* =========================================================
+   VERY SMALL SCREEN
+   ========================================================= */
+
+@media (max-width: 420px) {
+  .app {
+    padding:
+      20px 12px;
+
+    background-position:
+      center center;
+  }
+
+  .card {
+    padding:
+      25px 18px;
+  }
+
+  .header {
+    gap:
+      12px;
+  }
+
+  .brand-icon {
     width:
-      600px;
+      46px;
+
+    height:
+      46px;
   }
 
-  .aurora-one {
-    left:
-      -330px;
+  .header h1 {
+    font-size:
+      24px;
   }
 
-  .aurora-two {
-    right:
-      -450px;
+  .header p {
+    font-size:
+      12px;
   }
 
-  .aurora-three {
-    left:
-      -400px;
+  .description {
+    font-size:
+      12px;
+  }
+
+  .upload-area {
+    min-height:
+      76px;
+
+    padding:
+      12px 14px;
   }
 }
 
 
 /* =========================================================
    REDUCED MOTION
-========================================================= */
+   ========================================================= */
 
 @media (prefers-reduced-motion: reduce) {
-  .aurora,
-  .aurora-line,
-  .app::before,
-  .app::after,
   .card,
   .selected-file,
-  .status {
-    animation:
-      none !important;
+  .status,
+  .generate-button,
+  .upload-area,
+  .reset-button,
+  .brand-icon,
+  .brand-icon span,
+  .label-icon,
+  .upload-icon,
+  .document-icon,
+  .excel-icon,
+  .file-check,
+  .status-check,
+  .sparkle,
+  .arrow,
+  .footer span {
+    transition: none !important;
+
+    animation: none !important;
+  }
+
+  .generate-button::before {
+    animation: none !important;
   }
 
   * {
@@ -1409,3 +1194,4 @@
       auto !important;
   }
 }
+

@@ -166,17 +166,6 @@ function App() {
     <main className="app">
 
       {/* =====================================================
-          AURORA BACKGROUND
-      ===================================================== */}
-
-      <div className="aurora aurora-one"></div>
-      <div className="aurora aurora-two"></div>
-      <div className="aurora aurora-three"></div>
-
-      <div className="aurora-line aurora-line-one"></div>
-      <div className="aurora-line aurora-line-two"></div>
-
-      {/* =====================================================
           MAIN CARD
       ===================================================== */}
 

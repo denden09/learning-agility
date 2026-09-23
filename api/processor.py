@@ -19,8 +19,11 @@ from openpyxl import load_workbook
 # BASE DIRECTORY
 # ============================================================
 
-BASE_DIR = Path(
-    r"C:\Users\zerox\OneDrive\Documents\Desktop\learning"
+BASE_DIR = (
+    Path(__file__)
+    .resolve()
+    .parent
+    .parent
 )
 
 

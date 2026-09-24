@@ -2044,9 +2044,12 @@ def generate_reports(
             # PROFILE SUMMARY
             # ------------------------------------------------
 
-            wb = build_profile_summary(
-                wb,
-                employee_name
+            wb = fill_master_for_employee(
+                employee_name=employee_name,
+                master_file=MASTER_FILE,
+                scored_answers=scored_answers_df,
+                df_self=df_self,
+                df_superior=df_superior
             )
 
             # ------------------------------------------------

@@ -36,6 +36,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
+        "http://127.0.0.1:5173",
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -44,21 +45,23 @@ app.add_middleware(
 
 
 # ============================================================
-# HEALTH CHECK
+# ROOT
 # ============================================================
 
-@app.get("/")
+@app.get("/api")
 def root():
-
     return {
         "status": "ok",
         "service": "Learning Agility API",
     }
 
 
-@app.get("/health")
-def health():
+# ============================================================
+# HEALTH CHECK
+# ============================================================
 
+@app.get("/api/health")
+def health():
     return {
         "status": "healthy",
     }
@@ -79,15 +82,15 @@ def read_excel_upload(
     .xls  -> xlrd
     """
 
-    if filename.lower().endswith(".xlsx"):
+    filename = filename.lower()
 
+    if filename.endswith(".xlsx"):
         return pd.read_excel(
             io.BytesIO(file_bytes),
             engine="openpyxl",
         )
 
-    if filename.lower().endswith(".xls"):
-
+    if filename.endswith(".xls"):
         return pd.read_excel(
             io.BytesIO(file_bytes),
             engine="xlrd",
@@ -102,13 +105,10 @@ def read_excel_upload(
 # GENERATE
 # ============================================================
 
-@app.post("/generate")
+@app.post("/api/generate")
 async def generate(
-
     self_assessment: UploadFile = File(...),
-
     superior_assessment: UploadFile = File(...),
-
 ):
 
     # ========================================================
@@ -116,13 +116,11 @@ async def generate(
     # ========================================================
 
     self_filename = (
-        self_assessment.filename
-        or ""
+        self_assessment.filename or ""
     ).lower()
 
     superior_filename = (
-        superior_assessment.filename
-        or ""
+        superior_assessment.filename or ""
     ).lower()
 
     allowed_extensions = (
@@ -130,36 +128,30 @@ async def generate(
         ".xls",
     )
 
-    # --------------------------------------------------------
-    # SELF
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE SELF
+    # ========================================================
 
     if not self_filename.endswith(
         allowed_extensions
     ):
-
         raise HTTPException(
-
             status_code=400,
-
             detail=(
                 "Self Assessment harus "
                 "berupa file Excel (.xlsx atau .xls)."
             ),
         )
 
-    # --------------------------------------------------------
-    # SUPERIOR
-    # --------------------------------------------------------
+    # ========================================================
+    # VALIDATE SUPERIOR
+    # ========================================================
 
     if not superior_filename.endswith(
         allowed_extensions
     ):
-
         raise HTTPException(
-
             status_code=400,
-
             detail=(
                 "Superior Assessment harus "
                 "berupa file Excel (.xlsx atau .xls)."
@@ -172,9 +164,7 @@ async def generate(
         # READ UPLOAD
         # ====================================================
 
-        self_bytes = await (
-            self_assessment.read()
-        )
+        self_bytes = await self_assessment.read()
 
         superior_bytes = await (
             superior_assessment.read()
@@ -185,29 +175,19 @@ async def generate(
         # ====================================================
 
         if not self_bytes:
-
             raise HTTPException(
-
                 status_code=400,
-
-                detail=(
-                    "Self Assessment kosong."
-                ),
+                detail="Self Assessment kosong.",
             )
 
         if not superior_bytes:
-
             raise HTTPException(
-
                 status_code=400,
-
-                detail=(
-                    "Superior Assessment kosong."
-                ),
+                detail="Superior Assessment kosong.",
             )
 
         # ====================================================
-        # EXCEL → DATAFRAME
+        # EXCEL -> DATAFRAME
         # ====================================================
 
         try:
@@ -220,15 +200,12 @@ async def generate(
         except Exception as exc:
 
             raise HTTPException(
-
                 status_code=400,
-
                 detail={
                     "message": (
                         "Self Assessment "
                         "tidak dapat dibaca."
                     ),
-
                     "error": repr(exc),
                 },
             )
@@ -243,15 +220,12 @@ async def generate(
         except Exception as exc:
 
             raise HTTPException(
-
                 status_code=400,
-
                 detail={
                     "message": (
                         "Superior Assessment "
                         "tidak dapat dibaca."
                     ),
-
                     "error": repr(exc),
                 },
             )
@@ -261,11 +235,8 @@ async def generate(
         # ====================================================
 
         if df_self.empty:
-
             raise HTTPException(
-
                 status_code=400,
-
                 detail=(
                     "Self Assessment tidak "
                     "memiliki data."
@@ -273,11 +244,8 @@ async def generate(
             )
 
         if df_superior.empty:
-
             raise HTTPException(
-
                 status_code=400,
-
                 detail=(
                     "Superior Assessment tidak "
                     "memiliki data."
@@ -289,9 +257,7 @@ async def generate(
         # ====================================================
 
         result = generate_reports(
-
             df_self=df_self,
-
             df_superior=df_superior,
         )
 
@@ -301,12 +267,12 @@ async def generate(
 
         generated_files = result.get(
             "generated",
-            []
+            [],
         )
 
         failed_files = result.get(
             "failed",
-            []
+            [],
         )
 
         # ====================================================
@@ -316,30 +282,21 @@ async def generate(
         if len(generated_files) == 0:
 
             raise HTTPException(
-
                 status_code=422,
-
                 detail={
-
                     "message": (
                         "Tidak ada report yang "
                         "berhasil dibuat."
                     ),
-
-                    "employee_count":
-                        result.get(
-                            "employee_count",
-                            0
-                        ),
-
-                    "failed":
-                        failed_files,
-
-                    "master_file":
-                        result.get(
-                            "master_file",
-                            ""
-                        ),
+                    "employee_count": result.get(
+                        "employee_count",
+                        0,
+                    ),
+                    "failed": failed_files,
+                    "master_file": result.get(
+                        "master_file",
+                        "",
+                    ),
                 },
             )
 
@@ -350,21 +307,15 @@ async def generate(
         zip_buffer = io.BytesIO()
 
         with zipfile.ZipFile(
-
             zip_buffer,
-
             mode="w",
-
             compression=zipfile.ZIP_DEFLATED,
-
         ) as zip_file:
 
             for item in generated_files:
 
                 zip_file.writestr(
-
                     item["filename"],
-
                     item["content"],
                 )
 
@@ -379,9 +330,7 @@ async def generate(
         )
 
         response = StreamingResponse(
-
             zip_buffer,
-
             media_type="application/zip",
         )
 
@@ -392,7 +341,7 @@ async def generate(
         )
 
         # ====================================================
-        # OPTIONAL DEBUG HEADERS
+        # DEBUG HEADERS
         # ====================================================
 
         response.headers[
@@ -414,7 +363,6 @@ async def generate(
     # ========================================================
 
     except HTTPException:
-
         raise
 
     # ========================================================
@@ -424,17 +372,12 @@ async def generate(
     except Exception as exc:
 
         raise HTTPException(
-
             status_code=500,
-
             detail={
-
                 "message": (
                     "Terjadi error saat "
                     "memproses assessment."
                 ),
-
-                "error":
-                    repr(exc),
+                "error": repr(exc),
             },
         )

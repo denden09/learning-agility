@@ -30,7 +30,6 @@ import base64
 
 from html import escape as html_escape
 from pathlib import Path
-import xml.etree.ElementTree as ET
 
 import numpy as np
 import pandas as pd
@@ -1611,428 +1610,8 @@ def prepare_employee_values(
 
 
 # ============================================================
-# WRITE VALUES WITHOUT MICROSOFT EXCEL COM
+# WRITE VALUES USING MICROSOFT EXCEL COM
 # ============================================================
-
-# IMPORTANT:
-# The Master workbook is copied first in create_employee_file().
-# This function does NOT open/save the workbook with openpyxl.
-# It edits only the XML of the specific cells that Python needs to fill.
-# Therefore all other parts of the Master remain untouched:
-# fonts, fills, borders, alignment, row heights, column widths, merged cells,
-# images, charts, conditional formatting, page setup, print settings, etc.
-
-def _excel_xml_escape(value):
-
-    if value is None:
-        return ""
-
-    return (
-        str(value)
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('\"', "&quot;")
-        .replace("'", "&apos;")
-    )
-
-
-def _excel_serial(value):
-
-    # Excel date/time serial.
-    # openpyxl is used only for the conversion, not for saving the workbook.
-    from openpyxl.utils.datetime import to_excel
-
-    if isinstance(value, pd.Timestamp):
-        value = value.to_pydatetime()
-
-    return to_excel(value)
-
-
-def _cell_xml(cell_address, value, existing_cell_xml):
-
-    # Keep the existing cell attributes, especially the style index (s="...").
-    # Only replace the cell content/type.
-    cell_open_match = re.match(
-        rb"(<c\b[^>]*)(>)",
-        existing_cell_xml,
-        flags=re.DOTALL
-    )
-
-    if cell_open_match is None:
-        raise ValueError(
-            f"Format XML cell tidak valid untuk {cell_address}."
-        )
-
-    cell_open = cell_open_match.group(1)
-
-    # Remove only the old type attribute. Other attributes such as style
-    # remain exactly as they were in the Master.
-    cell_open = re.sub(
-        rb"\s+t=([\"']).*?\1",
-        b"",
-        cell_open,
-        flags=re.DOTALL
-    )
-
-    # None means the cell should be blank.
-    if value is None:
-        return cell_open + b"/>"
-
-    # Boolean
-    if isinstance(value, (bool, np.bool_)):
-
-        return (
-            cell_open
-            + b' t="b">'
-            + (b"1" if bool(value) else b"0")
-            + b"</c>"
-        )
-
-    # Date / datetime / time values must remain numeric Excel values.
-    if isinstance(
-        value,
-        (
-            pd.Timestamp,
-        )
-    ):
-        value = _excel_serial(value)
-
-    # Python datetime/date/time are handled here without changing the
-    # workbook through openpyxl.
-    try:
-        import datetime as _datetime
-
-        if isinstance(
-            value,
-            (
-                _datetime.datetime,
-                _datetime.date,
-                _datetime.time,
-            )
-        ):
-            value = _excel_serial(value)
-
-    except Exception:
-        pass
-
-    # NumPy scalar -> native Python scalar.
-    if isinstance(value, np.generic):
-        value = value.item()
-
-    # Numeric values stay numeric.
-    if isinstance(value, (int, float)) and not isinstance(value, bool):
-
-        if isinstance(value, float):
-            if np.isnan(value) or np.isinf(value):
-                return cell_open + b"/>"
-
-            numeric_text = repr(value)
-
-        else:
-            numeric_text = str(value)
-
-        return (
-            cell_open
-            + b">"
-            + numeric_text.encode("utf-8")
-            + b"</c>"
-        )
-
-    # Text is written as inlineStr. This avoids rebuilding sharedStrings.xml.
-    text_value = _excel_xml_escape(value)
-
-    return (
-        cell_open
-        + b' t="inlineStr">'
-        + b'<is><t xml:space="preserve">'
-        + text_value.encode("utf-8")
-        + b"</t></is></c>"
-    )
-
-
-def _replace_cell_in_sheet_xml(
-    sheet_xml,
-    cell_address,
-    value
-):
-
-    # XML worksheet data is namespaced, but the cell tag itself is still
-    # represented as <c ...>. Regex lets us modify only the requested cell
-    # without parsing/reserializing the complete worksheet XML.
-    cell_pattern = re.compile(
-        rb"<c\b[^>]*\br=([\"'])"
-        + re.escape(cell_address.encode("utf-8"))
-        + rb"\1[^>]*(?:/>|>.*?</c>)",
-        flags=re.DOTALL
-    )
-
-    match = cell_pattern.search(sheet_xml)
-
-    if match is not None:
-
-        existing_cell_xml = match.group(0)
-
-        replacement = _cell_xml(
-            cell_address,
-            value,
-            existing_cell_xml
-        )
-
-        return (
-            sheet_xml[:match.start()]
-            + replacement
-            + sheet_xml[match.end():]
-        )
-
-    # If the target cell does not exist in the Master XML, create it inside
-    # its existing row. This is only a fallback; normal Master cells should
-    # already exist.
-    row_match = re.search(
-        rb"<row\b[^>]*\br=([\"'])([0-9]+)\1[^>]*>(.*?)</row>",
-        sheet_xml,
-        flags=re.DOTALL
-    )
-
-    row_number_match = re.match(
-        r"[A-Z]+([0-9]+)$",
-        cell_address
-    )
-
-    if row_number_match is None:
-        raise ValueError(
-            f"Alamat cell tidak valid: {cell_address}"
-        )
-
-    row_number = row_number_match.group(1)
-
-    row_pattern = re.compile(
-        rb"(<row\b[^>]*\br=([\"'])"
-        + row_number.encode("utf-8")
-        + rb"\2[^>]*>)(.*?)(</row>)",
-        flags=re.DOTALL
-    )
-
-    row_match = row_pattern.search(sheet_xml)
-
-    if row_match is None:
-        raise ValueError(
-            f"Row {row_number} untuk cell {cell_address} tidak ditemukan."
-        )
-
-    new_cell = _cell_xml(
-        cell_address,
-        value,
-        b"<c r=\""
-        + cell_address.encode("utf-8")
-        + b"\"/>"
-    )
-
-    replacement_row = (
-        row_match.group(1)
-        + row_match.group(3)
-        + new_cell
-        + row_match.group(4)
-    )
-
-    return (
-        sheet_xml[:row_match.start()]
-        + replacement_row
-        + sheet_xml[row_match.end():]
-    )
-
-
-def _resolve_sheet_xml_paths(xlsx_zip):
-
-    # Resolve sheet name -> worksheet XML path using the workbook XML and
-    # workbook relationships. No workbook serialization is performed.
-    workbook_xml = xlsx_zip.read("xl/workbook.xml")
-    rels_xml = xlsx_zip.read("xl/_rels/workbook.xml.rels")
-
-    workbook_root = ET.fromstring(workbook_xml)
-    rels_root = ET.fromstring(rels_xml)
-
-    relationship_map = {}
-
-    for rel in rels_root:
-
-        rel_id = rel.attrib.get("Id")
-        target = rel.attrib.get("Target")
-
-        if not rel_id or not target:
-            continue
-
-        if target.startswith("/"):
-            target_path = target.lstrip("/")
-
-        else:
-            target_path = "xl/" + target.lstrip("/")
-
-        relationship_map[rel_id] = target_path
-
-    namespace = {
-        "main":
-            "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
-    }
-
-    sheet_paths = {}
-
-    for sheet in workbook_root.findall("main:sheets/main:sheet", namespace):
-
-        sheet_name = sheet.attrib.get("name")
-        rel_id = sheet.attrib.get(
-            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
-        )
-
-        if sheet_name and rel_id in relationship_map:
-            sheet_paths[sheet_name] = relationship_map[rel_id]
-
-    return sheet_paths
-
-
-def _write_values_preserving_master(
-    output_file,
-    employee_values
-):
-
-    import os
-    replacements = []
-
-    for sheet_name, cell_values in employee_values.items():
-
-        for cell_address, value in cell_values.items():
-
-            replacements.append(
-                (
-                    sheet_name,
-                    cell_address,
-                    clean_excel_value(value),
-                )
-            )
-
-    if not replacements:
-        return
-
-    temp_file = output_file.with_name(
-        output_file.name + ".tmp"
-    )
-
-    try:
-
-        # Read the already-copied Master package as raw ZIP members.
-        # No openpyxl save is involved.
-        with zipfile.ZipFile(
-            output_file,
-            mode="r"
-        ) as source_zip:
-
-            sheet_paths = _resolve_sheet_xml_paths(
-                source_zip
-            )
-
-            members = []
-
-            for info in source_zip.infolist():
-
-                members.append(
-                    (
-                        info,
-                        source_zip.read(info.filename)
-                    )
-                )
-
-        replacements_by_path = {}
-
-        for (
-            sheet_name,
-            cell_address,
-            value
-        ) in replacements:
-
-            sheet_path = sheet_paths.get(
-                sheet_name
-            )
-
-            if sheet_path is None:
-                raise ValueError(
-                    f"Sheet '{sheet_name}' tidak ditemukan "
-                    "di struktur XML Master."
-                )
-
-            replacements_by_path.setdefault(
-                sheet_path,
-                []
-            ).append(
-                (
-                    cell_address,
-                    value
-                )
-            )
-
-        # Change only the worksheet XML files that contain target cells.
-        updated_members = []
-
-        for info, data in members:
-
-            if info.filename not in replacements_by_path:
-
-                updated_members.append(
-                    (info, data)
-                )
-                continue
-
-            sheet_xml = data
-
-            for (
-                cell_address,
-                value
-            ) in replacements_by_path[
-                info.filename
-            ]:
-
-                sheet_xml = _replace_cell_in_sheet_xml(
-                    sheet_xml,
-                    cell_address,
-                    value
-                )
-
-            updated_members.append(
-                (
-                    info,
-                    sheet_xml
-                )
-            )
-
-        # Repackage the XLSX while preserving the original ZIP entry order
-        # and ZipInfo metadata. Only target worksheet XML bytes are changed.
-        with zipfile.ZipFile(
-            temp_file,
-            mode="w"
-        ) as destination_zip:
-
-            for info, data in updated_members:
-
-                destination_zip.writestr(
-                    info,
-                    data
-                )
-
-        os.replace(
-            temp_file,
-            output_file
-        )
-
-    except Exception:
-
-        if temp_file.exists():
-
-            try:
-                temp_file.unlink()
-            except Exception:
-                pass
-
-        raise
-
 
 def write_values_with_excel(
     output_file,
@@ -2041,17 +1620,161 @@ def write_values_with_excel(
 
     try:
 
-        _write_values_preserving_master(
-            output_file,
-            employee_values
+        import pythoncom
+        import win32com.client as win32
+
+    except ImportError:
+
+        raise ImportError(
+            "Library pywin32 belum terinstall.\n\n"
+            "Install dengan:\n"
+            "pip install pywin32"
         )
+
+    excel = None
+    workbook = None
+
+    # ========================================================
+    # INITIALIZE COM
+    # ========================================================
+
+    pythoncom.CoInitialize()
+
+    try:
+
+        # ====================================================
+        # START EXCEL
+        # ====================================================
+
+        excel = win32.DispatchEx(
+            "Excel.Application"
+        )
+
+        excel.Visible = False
+        excel.DisplayAlerts = False
+
+        try:
+
+            excel.AskToUpdateLinks = False
+
+        except Exception:
+
+            pass
+
+        # ====================================================
+        # OPEN COPIED MASTER
+        # ====================================================
+
+        workbook = excel.Workbooks.Open(
+            str(
+                output_file.resolve()
+            )
+        )
+
+        # ====================================================
+        # IDENTITAS
+        # ====================================================
+
+        ws_identity = workbook.Worksheets(
+            "Identitas"
+        )
+
+        for (
+            cell_address,
+            value
+        ) in employee_values[
+            "Identitas"
+        ].items():
+
+            ws_identity.Range(
+                cell_address
+            ).Value = value
+
+        # ====================================================
+        # 5 DIMENSIONS
+        # ====================================================
+
+        for sheet_name in ASSESSMENT_SHEETS:
+
+            worksheet = workbook.Worksheets(
+                sheet_name
+            )
+
+            sheet_values = (
+                employee_values.get(
+                    sheet_name,
+                    {}
+                )
+            )
+
+            for (
+                cell_address,
+                value
+            ) in sheet_values.items():
+
+                worksheet.Range(
+                    cell_address
+                ).Value = value
+
+        # ====================================================
+        # SAVE
+        # ====================================================
+
+        workbook.Save()
 
     except Exception as e:
 
         raise RuntimeError(
-            "Gagal menulis data ke Excel tanpa mengubah struktur Master.\n\n"
-            f"Detail: {e}"
+            "Gagal menulis data ke Excel.\n\n"
+            f"Detail: {e}\n\n"
+            "Pastikan Microsoft Excel terinstall "
+            "dan file Master tidak sedang dibuka "
+            "dengan mode yang mengunci file."
         ) from e
+
+    finally:
+
+        # ====================================================
+        # CLOSE WORKBOOK
+        # ====================================================
+
+        if workbook is not None:
+
+            try:
+
+                workbook.Close(
+                    SaveChanges=False
+                )
+
+            except Exception:
+
+                pass
+
+        # ====================================================
+        # QUIT EXCEL
+        # ====================================================
+
+        if excel is not None:
+
+            try:
+
+                excel.Quit()
+
+            except Exception:
+
+                pass
+
+        # ====================================================
+        # UNINITIALIZE COM
+        # ====================================================
+
+        try:
+
+            pythoncom.CoUninitialize()
+
+        except Exception:
+
+            pass
 
 
 # ============================================================

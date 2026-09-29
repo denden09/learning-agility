@@ -27,6 +27,8 @@ import shutil
 import zipfile
 import textwrap
 import base64
+import xml.etree.ElementTree as ET
+from datetime import datetime, date, time
 
 from html import escape as html_escape
 from pathlib import Path
@@ -35,6 +37,7 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
+from openpyxl.utils.datetime import to_excel
 
 
 # ============================================================
@@ -1616,110 +1619,678 @@ def prepare_employee_values(
 
 
 # ============================================================
-# WRITE VALUES USING OPENPYXL
+# WRITE VALUES WITHOUT REBUILDING THE XLSX WORKBOOK
 # ============================================================
 #
-# NOTE:
-# This replaces the previous Microsoft Excel COM implementation.
-# It works on Linux/Streamlit deployments because it does not
-# require Microsoft Excel or pywin32.
+# IMPORTANT:
+# The previous OpenPyXL implementation loaded the copied Master
+# and saved it again. Although the cell values were correct, that
+# could change the internal XLSX package / workbook structure.
+#
+# This implementation does NOT load/save the workbook with
+# OpenPyXL. Instead it:
+#
+#   1. Copies the Master file first.
+#   2. Opens the copied XLSX as a ZIP package.
+#   3. Finds the XML file for each worksheet.
+#   4. Changes ONLY the target cell XML.
+#   5. Writes all other ZIP entries back unchanged.
+#
+# Therefore the Master template remains the source of the workbook
+# structure, styles, drawings, relationships, etc. We only patch
+# the values that the application is supposed to fill.
+#
+# This is server-friendly and does not require:
+#   - Microsoft Excel
+#   - pywin32
+#   - Windows
 # ============================================================
+
+
+def _xlsx_sheet_paths(xlsx_zip):
+    """
+    Return mapping:
+
+        Excel sheet name -> ZIP member path
+
+    Example:
+        {
+            "Identitas": "xl/worksheets/sheet1.xml",
+            "mental agility": "xl/worksheets/sheet2.xml",
+            ...
+        }
+
+    workbook.xml and workbook.xml.rels are READ ONLY here.
+    They are never written back through ElementTree.
+    """
+
+    workbook_xml = xlsx_zip.read(
+        "xl/workbook.xml"
+    )
+
+    rels_xml = xlsx_zip.read(
+        "xl/_rels/workbook.xml.rels"
+    )
+
+    workbook_root = ET.fromstring(
+        workbook_xml
+    )
+
+    rels_root = ET.fromstring(
+        rels_xml
+    )
+
+    ns_main = {
+        "main":
+            "http://schemas.openxmlformats.org/spreadsheetml/2006/main",
+        "r":
+            "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    }
+
+    ns_rel = {
+        "rel":
+            "http://schemas.openxmlformats.org/package/2006/relationships"
+    }
+
+    relationship_targets = {}
+
+    for rel in rels_root.findall(
+        "rel:Relationship",
+        ns_rel
+    ):
+
+        relationship_id = rel.attrib.get(
+            "Id"
+        )
+
+        target = rel.attrib.get(
+            "Target"
+        )
+
+        if not relationship_id or not target:
+            continue
+
+        # Worksheet targets in workbook.xml.rels are normally
+        # relative to /xl/.
+        target = target.replace(
+            "\\",
+            "/"
+        )
+
+        if target.startswith("/"):
+            target = target.lstrip("/")
+        else:
+            target = (
+                "xl/"
+                + target.lstrip("./")
+            )
+
+        # Normalize accidental ./ or ../ segments.
+        parts = []
+
+        for part in target.split("/"):
+
+            if part in ("", "."):
+                continue
+
+            if part == "..":
+
+                if parts:
+                    parts.pop()
+
+                continue
+
+            parts.append(part)
+
+        relationship_targets[
+            relationship_id
+        ] = "/".join(parts)
+
+    sheet_paths = {}
+
+    sheets = workbook_root.find(
+        "main:sheets",
+        ns_main
+    )
+
+    if sheets is None:
+
+        raise ValueError(
+            "Workbook Master tidak memiliki bagian sheets."
+        )
+
+    for sheet in sheets.findall(
+        "main:sheet",
+        ns_main
+    ):
+
+        sheet_name = sheet.attrib.get(
+            "name"
+        )
+
+        relationship_id = sheet.attrib.get(
+            "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+        )
+
+        if not sheet_name or not relationship_id:
+            continue
+
+        target = relationship_targets.get(
+            relationship_id
+        )
+
+        if target:
+
+            sheet_paths[
+                sheet_name
+            ] = target
+
+    return sheet_paths
+
+
+def _xml_escape_text(value):
+    """
+    Escape text for XML while preserving leading/trailing spaces.
+    """
+
+    import html
+
+    return html.escape(
+        str(value),
+        quote=False
+    )
+
+
+def _normalize_patch_value(value):
+    """
+    Convert numpy/pandas scalar values to ordinary Python values.
+    """
+
+    if isinstance(
+        value,
+        np.generic
+    ):
+
+        value = value.item()
+
+    if isinstance(
+        value,
+        pd.Timestamp
+    ):
+
+        value = value.to_pydatetime()
+
+    return value
+
+
+def _cell_xml_content(value):
+    """
+    Build ONLY the inner XML of a cell.
+
+    For strings we use inlineStr so we do not need to modify the
+    workbook's sharedStrings.xml. For numbers/dates we use <v>.
+    """
+
+    value = _normalize_patch_value(
+        value
+    )
+
+    if value is None:
+
+        return ""
+
+    # pandas NaT / NaN should become an empty cell.
+    try:
+
+        if pd.isna(value):
+            return ""
+
+    except Exception:
+        pass
+
+    # datetime/date/time values are stored by Excel as numbers.
+    if isinstance(
+        value,
+        (
+            datetime,
+            date,
+            time
+        )
+    ):
+
+        serial = to_excel(
+            value
+        )
+
+        return (
+            "<v>"
+            + str(serial)
+            + "</v>"
+        )
+
+    # bool must be written as Excel boolean.
+    if isinstance(
+        value,
+        bool
+    ):
+
+        return (
+            "<v>"
+            + ("1" if value else "0")
+            + "</v>"
+        )
+
+    # Integers and floating-point values remain numeric.
+    if isinstance(
+        value,
+        (
+            int,
+            float
+        )
+    ):
+
+        if isinstance(value, float):
+
+            if not np.isfinite(value):
+                return ""
+
+            # Avoid unnecessary .0 for whole numbers.
+            if value.is_integer():
+                value = int(value)
+
+        return (
+            "<v>"
+            + str(value)
+            + "</v>"
+        )
+
+    # Everything else is treated as text.
+    text_value = str(value)
+
+    escaped = _xml_escape_text(
+        text_value
+    )
+
+    # xml:space="preserve" is important for comments/newlines and
+    # values that intentionally contain leading/trailing spaces.
+    return (
+        '<is><t xml:space="preserve">'
+        + escaped
+        + "</t></is>"
+    )
+
+
+def _set_cell_type_attribute(
+    opening_tag,
+    cell_type
+):
+    """
+    Keep every existing cell attribute (especially style `s`) and
+    only adjust/remove the `t` attribute.
+    """
+
+    # Remove an existing type attribute.
+    opening_tag = re.sub(
+        r'\s+t\s*=\s*["\'][^"\']*["\']',
+        "",
+        opening_tag,
+        count=1
+    )
+
+    # A cell may originally be self-closing: <c .../>.
+    # Normalize it to an opening tag before adding/removing the type.
+    if opening_tag.endswith("/>"):
+        opening_tag = opening_tag[:-2] + ">"
+
+    if cell_type is None:
+        return opening_tag
+
+    # Insert type directly before the closing `>`.
+    return opening_tag[:-1] + (
+        ' t="'
+        + cell_type
+        + '"'
+        + ">"
+    )
+
+
+def _patch_existing_cell(
+    sheet_xml,
+    cell_address,
+    value
+):
+    """
+    Patch an existing <c r="CELL">...</c> element while keeping
+    its opening attributes, including style, untouched.
+
+    Returns:
+        (patched_xml, found)
+    """
+
+    escaped_address = re.escape(
+        str(cell_address)
+    )
+
+    # Handles normal cells:
+    #   <c r="D2" s="12">...</c>
+    # and self-closing cells:
+    #   <c r="D2" s="12"/>
+    pattern = re.compile(
+        rb'<c\b(?=[^>]*\br=["\']'
+        + escaped_address.encode("utf-8")
+        + rb'["\'])[^>]*(?:/>|>.*?</c>)',
+        re.DOTALL
+    )
+
+    match = pattern.search(
+        sheet_xml
+    )
+
+    if match is None:
+        return sheet_xml, False
+
+    original = match.group(
+        0
+    )
+
+    # Extract the opening <c ...> tag.
+    opening_match = re.match(
+        rb'<c\b[^>]*>',
+        original
+    )
+
+    if opening_match is None:
+        raise ValueError(
+            f"Format cell XML tidak valid untuk {cell_address}."
+        )
+
+    opening_tag = (
+        opening_match
+        .group(0)
+        .decode("utf-8")
+    )
+
+    value = _normalize_patch_value(
+        value
+    )
+
+    # Determine the XML representation/type.
+    if value is None:
+
+        new_opening = _set_cell_type_attribute(
+            opening_tag,
+            None
+        )
+
+        new_cell = (
+            new_opening[:-1]
+            + "/>"
+        )
+
+    else:
+
+        try:
+            is_empty = pd.isna(value)
+        except Exception:
+            is_empty = False
+
+        if is_empty:
+
+            new_opening = _set_cell_type_attribute(
+                opening_tag,
+                None
+            )
+
+            new_cell = (
+                new_opening[:-1]
+                + "/>"
+            )
+
+        elif isinstance(
+            value,
+            bool
+        ):
+
+            new_opening = _set_cell_type_attribute(
+                opening_tag,
+                "b"
+            )
+
+            new_cell = (
+                new_opening
+                + _cell_xml_content(value)
+                + "</c>"
+            )
+
+        elif isinstance(
+            value,
+            (
+                int,
+                float,
+                np.integer,
+                np.floating,
+                datetime,
+                date,
+                time,
+                pd.Timestamp
+            )
+        ):
+
+            new_opening = _set_cell_type_attribute(
+                opening_tag,
+                None
+            )
+
+            new_cell = (
+                new_opening
+                + _cell_xml_content(value)
+                + "</c>"
+            )
+
+        else:
+
+            new_opening = _set_cell_type_attribute(
+                opening_tag,
+                "inlineStr"
+            )
+
+            new_cell = (
+                new_opening
+                + _cell_xml_content(value)
+                + "</c>"
+            )
+
+    return (
+        sheet_xml[:match.start()]
+        + new_cell.encode("utf-8")
+        + sheet_xml[match.end():],
+        True
+    )
+
+
+def _patch_cell_in_sheet_xml(
+    sheet_xml,
+    cell_values
+):
+    """
+    Patch all requested cells in one worksheet.
+
+    Existing cells are required because the Master template should
+    already contain these formatted cells. This protects the template
+    structure instead of silently creating new unformatted cells.
+    """
+
+    patched_xml = sheet_xml
+    missing_cells = []
+
+    for (
+        cell_address,
+        value
+    ) in cell_values.items():
+
+        patched_xml, found = (
+            _patch_existing_cell(
+                patched_xml,
+                cell_address,
+                value
+            )
+        )
+
+        if not found:
+
+            missing_cells.append(
+                cell_address
+            )
+
+    if missing_cells:
+
+        raise ValueError(
+            "Cell berikut tidak ditemukan pada Master "
+            "sehingga tidak aman untuk dipatch tanpa "
+            "mengubah struktur template: "
+            + ", ".join(missing_cells)
+        )
+
+    return patched_xml
+
 
 def write_values_with_excel(
     output_file,
     employee_values
 ):
+    """
+    Historical function name is intentionally retained so the rest
+    of the application does not need to change.
 
-    workbook = None
+    Despite the name, this function does NOT use Microsoft Excel.
+    It patches the copied XLSX package directly.
+    """
+
+    output_file = Path(
+        output_file
+    )
+
+    if not output_file.exists():
+
+        raise FileNotFoundError(
+            "Output Excel tidak ditemukan:\n"
+            f"{output_file}"
+        )
+
+    temp_file = output_file.with_suffix(
+        ".tmp.xlsx"
+    )
+
+    if temp_file.exists():
+
+        temp_file.unlink()
+
+    # Build sheet -> cell map.
+    values_by_sheet = {
+        sheet_name: dict(
+            sheet_values or {}
+        )
+        for sheet_name, sheet_values
+        in employee_values.items()
+        if sheet_values is not None
+    }
 
     try:
 
-        # ====================================================
-        # OPEN COPIED MASTER
-        # ====================================================
-
-        workbook = load_workbook(
+        with zipfile.ZipFile(
             output_file,
-            data_only=False
+            mode="r"
+        ) as source_zip:
+
+            sheet_paths = _xlsx_sheet_paths(
+                source_zip
+            )
+
+            # Validate all requested sheets before creating output.
+            for sheet_name in values_by_sheet:
+
+                if sheet_name not in sheet_paths:
+
+                    raise ValueError(
+                        f"Sheet '{sheet_name}' tidak ditemukan "
+                        "di Master XLSX."
+                    )
+
+            with zipfile.ZipFile(
+                temp_file,
+                mode="w"
+            ) as target_zip:
+
+                for info in source_zip.infolist():
+
+                    data = source_zip.read(
+                        info.filename
+                    )
+
+                    # Only these worksheet XML entries are modified.
+                    sheet_names_for_path = [
+
+                        sheet_name
+
+                        for sheet_name, path
+                        in sheet_paths.items()
+
+                        if path == info.filename
+
+                    ]
+
+                    for sheet_name in sheet_names_for_path:
+
+                        cell_values = values_by_sheet.get(
+                            sheet_name,
+                            {}
+                        )
+
+                        if cell_values:
+
+                            data = _patch_cell_in_sheet_xml(
+                                data,
+                                cell_values
+                            )
+
+                    # Keep the original ZipInfo metadata as much as
+                    # zipfile allows; the workbook's other entries are
+                    # copied byte-for-byte.
+                    target_zip.writestr(
+                        info,
+                        data
+                    )
+
+        # Atomic replacement: only replace the copied employee file
+        # after the complete patched XLSX has been successfully built.
+        temp_file.replace(
+            output_file
         )
-
-        # ====================================================
-        # IDENTITAS
-        # ====================================================
-
-        if "Identitas" not in workbook.sheetnames:
-
-            raise ValueError(
-                "Sheet 'Identitas' tidak ditemukan pada Master."
-            )
-
-        ws_identity = workbook["Identitas"]
-
-        for (
-            cell_address,
-            value
-        ) in employee_values.get(
-            "Identitas",
-            {}
-        ).items():
-
-            # Convert numpy scalar values to normal Python values.
-            if isinstance(value, np.generic):
-                value = value.item()
-
-            ws_identity[cell_address] = value
-
-        # ====================================================
-        # 5 DIMENSIONS
-        # ====================================================
-
-        for sheet_name in ASSESSMENT_SHEETS:
-
-            if sheet_name not in workbook.sheetnames:
-
-                raise ValueError(
-                    f"Sheet '{sheet_name}' tidak ditemukan pada Master."
-                )
-
-            worksheet = workbook[sheet_name]
-
-            sheet_values = employee_values.get(
-                sheet_name,
-                {}
-            )
-
-            for (
-                cell_address,
-                value
-            ) in sheet_values.items():
-
-                # Convert numpy scalar values to normal Python values.
-                if isinstance(value, np.generic):
-                    value = value.item()
-
-                worksheet[cell_address] = value
-
-        # ====================================================
-        # SAVE
-        # ====================================================
-
-        workbook.save(output_file)
 
     except Exception as e:
 
-        raise RuntimeError(
-            "Gagal menulis data ke Excel menggunakan openpyxl.\n\n"
-            f"Detail: {e}"
-        ) from e
-
-    finally:
-
-        if workbook is not None:
+        if temp_file.exists():
 
             try:
-                workbook.close()
+                temp_file.unlink()
             except Exception:
                 pass
+
+        if isinstance(
+            e,
+            (
+                FileNotFoundError,
+                ValueError
+            )
+        ):
+
+            raise
+
+        raise RuntimeError(
+            "Gagal menulis data ke Excel tanpa mengubah "
+            "struktur Master.\n\n"
+            f"Detail: {e}"
+        ) from e
 
 
 # ============================================================

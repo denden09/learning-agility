@@ -10,7 +10,7 @@
 #
 # Excel output:
 #   - Master is copied first
-#   - Values are written using Microsoft Excel COM
+#   - Values are written using openpyxl
 #   - Original Master is never edited
 #
 # Background:
@@ -1610,7 +1610,8 @@ def prepare_employee_values(
 
 
 # ============================================================
-# WRITE VALUES USING MICROSOFT EXCEL COM
+# WRITE VALUES USING OPENPYXL
+# Streamlit Cloud / Linux compatible
 # ============================================================
 
 def write_values_with_excel(
@@ -1618,163 +1619,52 @@ def write_values_with_excel(
     employee_values
 ):
 
-    try:
-
-        import pythoncom
-        import win32com.client as win32
-
-    except ImportError:
-
-        raise ImportError(
-            "Library pywin32 belum terinstall.\n\n"
-            "Install dengan:\n"
-            "pip install pywin32"
-        )
-
-    excel = None
     workbook = None
 
-    # ========================================================
-    # INITIALIZE COM
-    # ========================================================
-
-    pythoncom.CoInitialize()
-
     try:
 
-        # ====================================================
-        # START EXCEL
-        # ====================================================
-
-        excel = win32.DispatchEx(
-            "Excel.Application"
+        workbook = load_workbook(
+            output_file,
+            data_only=False
         )
 
-        excel.Visible = False
-        excel.DisplayAlerts = False
-
-        try:
-
-            excel.AskToUpdateLinks = False
-
-        except Exception:
-
-            pass
-
-        # ====================================================
-        # OPEN COPIED MASTER
-        # ====================================================
-
-        workbook = excel.Workbooks.Open(
-            str(
-                output_file.resolve()
+        if 'Identitas' not in workbook.sheetnames:
+            raise ValueError(
+                "Sheet 'Identitas' tidak ditemukan pada Master Template."
             )
-        )
 
-        # ====================================================
-        # IDENTITAS
-        # ====================================================
+        ws_identity = workbook['Identitas']
 
-        ws_identity = workbook.Worksheets(
-            "Identitas"
-        )
-
-        for (
-            cell_address,
-            value
-        ) in employee_values[
-            "Identitas"
-        ].items():
-
-            ws_identity.Range(
-                cell_address
-            ).Value = value
-
-        # ====================================================
-        # 5 DIMENSIONS
-        # ====================================================
+        for cell_address, value in employee_values['Identitas'].items():
+            ws_identity[cell_address] = clean_excel_value(value)
 
         for sheet_name in ASSESSMENT_SHEETS:
 
-            worksheet = workbook.Worksheets(
-                sheet_name
-            )
-
-            sheet_values = (
-                employee_values.get(
-                    sheet_name,
-                    {}
+            if sheet_name not in workbook.sheetnames:
+                raise ValueError(
+                    f"Sheet '{sheet_name}' tidak ditemukan pada Master Template."
                 )
-            )
 
-            for (
-                cell_address,
-                value
-            ) in sheet_values.items():
+            worksheet = workbook[sheet_name]
+            sheet_values = employee_values.get(sheet_name, {})
 
-                worksheet.Range(
-                    cell_address
-                ).Value = value
+            for cell_address, value in sheet_values.items():
+                worksheet[cell_address] = clean_excel_value(value)
 
-        # ====================================================
-        # SAVE
-        # ====================================================
-
-        workbook.Save()
+        workbook.save(output_file)
 
     except Exception as e:
-
         raise RuntimeError(
             "Gagal menulis data ke Excel.\n\n"
-            f"Detail: {e}\n\n"
-            "Pastikan Microsoft Excel terinstall "
-            "dan file Master tidak sedang dibuka "
-            "dengan mode yang mengunci file."
+            f"Detail: {e}"
         ) from e
 
     finally:
-
-        # ====================================================
-        # CLOSE WORKBOOK
-        # ====================================================
-
         if workbook is not None:
-
             try:
-
-                workbook.Close(
-                    SaveChanges=False
-                )
-
+                workbook.close()
             except Exception:
-
                 pass
-
-        # ====================================================
-        # QUIT EXCEL
-        # ====================================================
-
-        if excel is not None:
-
-            try:
-
-                excel.Quit()
-
-            except Exception:
-
-                pass
-
-        # ====================================================
-        # UNINITIALIZE COM
-        # ====================================================
-
-        try:
-
-            pythoncom.CoUninitialize()
-
-        except Exception:
-
-            pass
 
 
 # ============================================================

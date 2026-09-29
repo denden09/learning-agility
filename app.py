@@ -42,7 +42,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import streamlit as st
-from lxml import etree
+import xml.etree.ElementTree as ET
 from openpyxl import load_workbook
 
 
@@ -807,6 +807,7 @@ def prepare_employee_values(
 # XLSX XML WRITER  (PENGGANTI PYWIN32 / EXCEL COM)
 #
 # Menulis nilai langsung ke XML di dalam paket .xlsx.
+# - Hanya memakai library bawaan Python (tanpa lxml / pywin32)
 # - Style cell (atribut s=) dipertahankan
 # - Chart, gambar, merge, validation, dll. tidak tersentuh
 # - Formula dihitung ulang otomatis saat file dibuka di Excel
@@ -826,6 +827,7 @@ NS_XML = "http://www.w3.org/XML/1998/namespace"
 
 _ILLEGAL_XML_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
 _EXCEL_EPOCH = datetime(1899, 12, 30)
+_START_TAG_RE = re.compile(rb"<[A-Za-z_][^>]*>")
 
 
 def _q(tag):
@@ -853,14 +855,75 @@ def _split_address(address):
     return match.group(1).upper(), int(match.group(2))
 
 
-def _xml_bytes(root):
+def _insert_before(parent, reference, new_element):
 
-    return etree.tostring(
-        root,
-        xml_declaration=True,
-        encoding="UTF-8",
-        standalone=True,
-    )
+    parent.insert(list(parent).index(reference), new_element)
+
+
+def _insert_after(parent, reference, new_element):
+
+    parent.insert(list(parent).index(reference) + 1, new_element)
+
+
+# ------------------------------------------------------------
+# PARSE / SERIALIZE
+#
+# ElementTree bawaan Python bisa mengubah prefix namespace dan
+# membuang deklarasi xmlns yang tidak dipakai (mis. yang dirujuk
+# oleh mc:Ignorable) -> Excel bisa minta "repair".
+# Solusi: daftarkan semua namespace asli, lalu tag root asli
+# dikembalikan persis seperti aslinya setelah serialisasi.
+# ------------------------------------------------------------
+
+def _parse_xml(data):
+
+    ns_pairs = []
+
+    for _, item in ET.iterparse(io.BytesIO(data), events=("start-ns",)):
+        ns_pairs.append(item)
+
+    for prefix, uri in ns_pairs:
+
+        try:
+            ET.register_namespace(prefix, uri)
+        except ValueError:
+            pass
+
+    root = ET.fromstring(data)
+
+    return root, ns_pairs
+
+
+def _serialize_xml(root, original_bytes, ns_pairs):
+
+    out = ET.tostring(root, encoding="UTF-8", xml_declaration=True)
+
+    original_match = _START_TAG_RE.search(original_bytes)
+    new_match = _START_TAG_RE.search(out)
+
+    if original_match is None or new_match is None:
+        return out
+
+    root_tag = original_match.group(0)
+
+    # pastikan semua namespace yang pernah dipakai tetap terdeklarasi
+    for prefix, uri in ns_pairs:
+
+        if prefix:
+            pattern = rb"\sxmlns:" + re.escape(prefix.encode()) + rb"="
+            declaration = f' xmlns:{prefix}="{uri}"'.encode()
+        else:
+            pattern = rb"\sxmlns="
+            declaration = f' xmlns="{uri}"'.encode()
+
+        if re.search(pattern, root_tag) is None:
+
+            if root_tag.endswith(b"/>"):
+                root_tag = root_tag[:-2] + declaration + b"/>"
+            else:
+                root_tag = root_tag[:-1] + declaration + b">"
+
+    return out[:new_match.start()] + root_tag + out[new_match.end():]
 
 
 def _normalize_value(value):
@@ -924,7 +987,7 @@ def _set_cell_value(cell, value):
 
         cell.set("t", "b")
 
-        v = etree.SubElement(cell, _q("v"))
+        v = ET.SubElement(cell, _q("v"))
         v.text = "1" if value else "0"
 
         return
@@ -932,7 +995,7 @@ def _set_cell_value(cell, value):
     # ---------------------------------------------- angka
     if isinstance(value, (int, float)):
 
-        v = etree.SubElement(cell, _q("v"))
+        v = ET.SubElement(cell, _q("v"))
 
         if isinstance(value, float) and value.is_integer():
             v.text = str(int(value))
@@ -944,7 +1007,7 @@ def _set_cell_value(cell, value):
     # ---------------------------------------------- tanggal
     if isinstance(value, (datetime, date)):
 
-        v = etree.SubElement(cell, _q("v"))
+        v = ET.SubElement(cell, _q("v"))
         v.text = repr(_to_excel_serial(value))
 
         return
@@ -955,8 +1018,8 @@ def _set_cell_value(cell, value):
 
     cell.set("t", "inlineStr")
 
-    is_el = etree.SubElement(cell, _q("is"))
-    t_el = etree.SubElement(is_el, _q("t"))
+    is_el = ET.SubElement(cell, _q("is"))
+    t_el = ET.SubElement(is_el, _q("t"))
     t_el.set(f"{{{NS_XML}}}space", "preserve")
     t_el.text = text
 
@@ -977,13 +1040,13 @@ def _get_or_create_row(sheet_data, row_num):
 
         if r_num > row_num:
 
-            new_row = etree.Element(_q("row"))
+            new_row = ET.Element(_q("row"))
             new_row.set("r", str(row_num))
-            row.addprevious(new_row)
+            _insert_before(sheet_data, row, new_row)
 
             return new_row
 
-    new_row = etree.SubElement(sheet_data, _q("row"))
+    new_row = ET.SubElement(sheet_data, _q("row"))
     new_row.set("r", str(row_num))
 
     return new_row
@@ -1008,30 +1071,26 @@ def _get_or_create_cell(row, address):
 
         if c_col > target_col:
 
-            new_cell = etree.Element(_q("c"))
+            new_cell = ET.Element(_q("c"))
             new_cell.set("r", address)
-            cell.addprevious(new_cell)
+            _insert_before(row, cell, new_cell)
 
             return new_cell
 
-    new_cell = etree.SubElement(row, _q("c"))
+    new_cell = ET.SubElement(row, _q("c"))
     new_cell.set("r", address)
-
-    # atribut spans (opsional) bisa jadi tidak akurat lagi
-    if "spans" in row.attrib:
-        del row.attrib["spans"]
 
     return new_cell
 
 
 def _write_cells_to_sheet_xml(sheet_xml_bytes, cell_values):
 
-    root = etree.fromstring(sheet_xml_bytes)
+    root, ns_pairs = _parse_xml(sheet_xml_bytes)
 
     sheet_data = root.find(_q("sheetData"))
 
     if sheet_data is None:
-        sheet_data = etree.SubElement(root, _q("sheetData"))
+        sheet_data = ET.SubElement(root, _q("sheetData"))
 
     for address, value in cell_values.items():
 
@@ -1039,6 +1098,7 @@ def _write_cells_to_sheet_xml(sheet_xml_bytes, cell_values):
 
         row = _get_or_create_row(sheet_data, row_num)
 
+        # atribut spans (opsional) bisa jadi tidak akurat lagi
         if "spans" in row.attrib:
             del row.attrib["spans"]
 
@@ -1046,7 +1106,7 @@ def _write_cells_to_sheet_xml(sheet_xml_bytes, cell_values):
 
         _set_cell_value(cell, value)
 
-    return _xml_bytes(root)
+    return _serialize_xml(root, sheet_xml_bytes, ns_pairs)
 
 
 def _resolve_sheet_paths(contents):
@@ -1054,8 +1114,8 @@ def _resolve_sheet_paths(contents):
     Peta: nama sheet -> path XML di dalam paket .xlsx
     """
 
-    wb_root = etree.fromstring(contents["xl/workbook.xml"])
-    rels_root = etree.fromstring(contents["xl/_rels/workbook.xml.rels"])
+    wb_root = ET.fromstring(contents["xl/workbook.xml"])
+    rels_root = ET.fromstring(contents["xl/_rels/workbook.xml.rels"])
 
     rel_map = {
         rel.get("Id"): rel.get("Target")
@@ -1094,13 +1154,15 @@ def _force_full_recalc(contents):
     """
 
     # ---------------- workbook.xml
-    wb_root = etree.fromstring(contents["xl/workbook.xml"])
+    original_wb = contents["xl/workbook.xml"]
+
+    wb_root, wb_ns = _parse_xml(original_wb)
 
     calc_pr = wb_root.find(_q("calcPr"))
 
     if calc_pr is None:
 
-        calc_pr = etree.Element(_q("calcPr"))
+        calc_pr = ET.Element(_q("calcPr"))
 
         anchor = None
 
@@ -1116,31 +1178,43 @@ def _force_full_recalc(contents):
                 anchor = found
 
         if anchor is not None:
-            anchor.addnext(calc_pr)
+            _insert_after(wb_root, anchor, calc_pr)
         else:
             wb_root.append(calc_pr)
 
     calc_pr.set("fullCalcOnLoad", "1")
 
-    contents["xl/workbook.xml"] = _xml_bytes(wb_root)
+    contents["xl/workbook.xml"] = _serialize_xml(
+        wb_root,
+        original_wb,
+        wb_ns,
+    )
 
     # ---------------- calcChain
     if "xl/calcChain.xml" in contents:
 
         del contents["xl/calcChain.xml"]
 
-        rels_root = etree.fromstring(contents["xl/_rels/workbook.xml.rels"])
+        original_rels = contents["xl/_rels/workbook.xml.rels"]
+
+        rels_root, rels_ns = _parse_xml(original_rels)
 
         for rel in rels_root.findall(f"{{{NS_PKG_REL}}}Relationship"):
 
             if (rel.get("Type") or "").endswith("/calcChain"):
                 rels_root.remove(rel)
 
-        contents["xl/_rels/workbook.xml.rels"] = _xml_bytes(rels_root)
+        contents["xl/_rels/workbook.xml.rels"] = _serialize_xml(
+            rels_root,
+            original_rels,
+            rels_ns,
+        )
 
         if "[Content_Types].xml" in contents:
 
-            ct_root = etree.fromstring(contents["[Content_Types].xml"])
+            original_ct = contents["[Content_Types].xml"]
+
+            ct_root, ct_ns = _parse_xml(original_ct)
 
             for override in ct_root.findall(
                 f"{{{NS_CONTENT_TYPES}}}Override"
@@ -1149,7 +1223,11 @@ def _force_full_recalc(contents):
                 if override.get("PartName") == "/xl/calcChain.xml":
                     ct_root.remove(override)
 
-            contents["[Content_Types].xml"] = _xml_bytes(ct_root)
+            contents["[Content_Types].xml"] = _serialize_xml(
+                ct_root,
+                original_ct,
+                ct_ns,
+            )
 
 
 def write_values_to_xlsx(output_file, employee_values):

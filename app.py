@@ -1,286 +1,751 @@
-from pathlib import Path
+# ============================================================
+# app.py — LEARNING AGILITY ASSESSMENT
+#
+# Master Template:
+#   bundled inside application
+#
+# User uploads:
+#   1. Self Assessment
+#   2. Superior Assessment
+#
+# Excel output:
+#   - Master is copied first
+#   - Values are written using Microsoft Excel COM
+#   - Original Master is never edited
+#
+# Background:
+#   public/abstract-orange-bg.png
+#
+# Output:
+#   - Individual Excel
+#   - All Employees ZIP
+# ============================================================
 
-app_code = r'''import io
+import io
 import re
-import time
+import shutil
 import zipfile
-import tempfile
+import textwrap
+import base64
+
+from html import escape as html_escape
 from pathlib import Path
-from datetime import datetime, date, time as dt_time
 
 import numpy as np
 import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook
-from openpyxl.utils.datetime import to_excel
 
 
 # ============================================================
-# APP CONFIGURATION
+# PAGE CONFIG
 # ============================================================
 
 st.set_page_config(
-    page_title="Learning Agility Assessment",
-    page_icon="📊",
+    page_title="Learning System",
+    page_icon="📙",
     layout="wide",
 )
 
-APP_DIR = Path(__file__).resolve().parent
-MASTER_FILE = APP_DIR / "templates" / "master.xlsx"
 
-DIMENSIONS = {
-    "mental_agility": "mental agility",
-    "people_agility": "people agility",
-    "change_agility": "change agility",
-    "result_agility": "result agility",
-    "self_awareness": "self awareness",
-}
+# ============================================================
+# CONFIGURATION
+# ============================================================
 
-IDENTITY_INPUT_CELLS = [
-    "D2",   # Nama
-    "D3",   # Nama Atasan
-    "D4",   # Level Saat Ini
-    "D5",   # Level Tujuan
-    "D6",   # Tanggal Assessment
-    "D7",   # Unit
-    "D8",   # Departemen
-    "D9",   # Divisi
-    "D10",  # Direktorat
-    "D12",  # Level Next Path
-]
-
-ASSESSMENT_INPUT_COLUMNS = {
-    "self_rating": 9,       # I
-    "self_comment": 10,     # J
-    "superior_rating": 11,  # K
-    "superior_comment": 12, # L
-}
-
-ASSESSMENT_ROWS = list(range(13, 23))
-ASSESSMENT_SHEETS = list(DIMENSIONS.values())
-
-# Hanya cell berikut yang boleh diubah oleh Python.
-# Semua cell lain harus tetap berasal dari master.
-ALLOWED_OUTPUT_CELLS = {
-    "Identitas": set(IDENTITY_INPUT_CELLS),
-}
-
-for _sheet in ASSESSMENT_SHEETS:
-    ALLOWED_OUTPUT_CELLS[_sheet] = {
-        f"{column_letter}{row}"
-        for row in ASSESSMENT_ROWS
-        for column_letter in ("I", "J", "K", "L")
-    }
+BASE_DIR = Path(__file__).resolve().parent
 
 
 # ============================================================
-# HELPERS
+# MASTER TEMPLATE
+# ============================================================
+
+MASTER_FILE = (
+    BASE_DIR
+    / "data"
+    / "master"
+    / "Learning agility self assesment & superior_24.7.2026.xlsx"
+)
+
+
+# ============================================================
+# OUTPUT
+# ============================================================
+
+OUTPUT_DIR = (
+    BASE_DIR
+    / "generated"
+)
+
+
+# ============================================================
+# BACKGROUND IMAGE
+# ============================================================
+
+BACKGROUND_IMAGE = (
+    BASE_DIR
+    / "public"
+    / "abstract-orange-bg.png"
+)
+
+
+def get_background_base64(
+    image_path
+):
+
+    if not image_path.exists():
+
+        return None
+
+    with open(
+        image_path,
+        "rb"
+    ) as image_file:
+
+        return base64.b64encode(
+            image_file.read()
+        ).decode(
+            "utf-8"
+        )
+
+
+BACKGROUND_BASE64 = (
+    get_background_base64(
+        BACKGROUND_IMAGE
+    )
+)
+
+
+# ============================================================
+# DIMENSIONS
+# ============================================================
+
+DIMENSIONS = {
+
+    "mental_agility":
+        "mental agility",
+
+    "people_agility":
+        "people agility",
+
+    "change_agility":
+        "change agility",
+
+    "result_agility":
+        "result agility",
+
+    "self_awareness":
+        "self awareness",
+}
+
+
+# ============================================================
+# IDENTITY
+# ============================================================
+
+IDENTITY_INPUT_CELLS = [
+
+    "D2",
+    "D3",
+    "D4",
+    "D5",
+    "D6",
+    "D7",
+    "D8",
+    "D9",
+    "D10",
+    "D12",
+
+]
+
+
+# ============================================================
+# ASSESSMENT COLUMNS
+# ============================================================
+
+ASSESSMENT_INPUT_COLUMNS = {
+
+    "self_rating":
+        9,
+
+    "self_comment":
+        10,
+
+    "superior_rating":
+        11,
+
+    "superior_comment":
+        12,
+
+}
+
+
+ASSESSMENT_ROWS = list(
+    range(
+        13,
+        23
+    )
+)
+
+
+ASSESSMENT_SHEETS = list(
+    DIMENSIONS.values()
+)
+
+
+# ============================================================
+# TEXT NORMALIZATION
 # ============================================================
 
 def normalize_text(value):
-    """Normalisasi teks untuk pencocokan yang konsisten."""
+
     if pd.isna(value):
+
         return ""
 
-    value = str(value)
-    value = value.replace("\xa0", " ")
-    value = value.replace("\n", " ")
-    value = value.replace("\r", " ")
-    value = re.sub(r"\s+", " ", value)
+    value = str(
+        value
+    )
+
+    value = value.replace(
+        "\xa0",
+        " "
+    )
+
+    value = value.replace(
+        "\n",
+        " "
+    )
+
+    value = value.replace(
+        "\r",
+        " "
+    )
+
+    value = re.sub(
+        r"\s+",
+        " ",
+        value
+    )
 
     return value.strip().lower()
 
 
+# ============================================================
+# CLEAN VALUE
+# ============================================================
+
 def clean_value(value):
-    """Membersihkan value dari Excel. NaN / None -> string kosong."""
+
     if pd.isna(value):
+
         return ""
 
-    return str(value).strip()
+    return str(
+        value
+    ).strip()
 
+
+# ============================================================
+# CLEAN EXCEL VALUE
+# ============================================================
 
 def clean_excel_value(value):
-    """
-    Mengubah NaN/empty menjadi None dan Timestamp menjadi
-    datetime Python.
-    """
+
     if value is None:
+
         return None
 
     try:
+
         if pd.isna(value):
+
             return None
+
     except Exception:
+
         pass
 
-    if isinstance(value, pd.Timestamp):
-        return value.to_pydatetime()
+    if isinstance(
+        value,
+        str
+    ):
 
-    if isinstance(value, np.generic):
-        return value.item()
-
-    if isinstance(value, str):
         value = value.strip()
 
         if value == "":
+
             return None
 
     return value
 
 
-def find_column(df, candidates):
-    """Mencari nama kolom berdasarkan nama yang sudah dinormalisasi."""
+# ============================================================
+# RENDER HTML
+# ============================================================
+
+def render_html(html):
+
+    clean_html = " ".join(
+
+        line.strip()
+
+        for line in html.splitlines()
+
+        if line.strip()
+
+    )
+
+    st.markdown(
+        clean_html,
+        unsafe_allow_html=True
+    )
+
+
+# ============================================================
+# FIND COLUMN
+# ============================================================
+
+def find_column(
+    df,
+    candidates
+):
+
     if df is None or df.empty:
+
         return None
 
     normalized_columns = {
-        normalize_text(col): col
+
+        normalize_text(col):
+            col
+
         for col in df.columns
+
     }
 
     for candidate in candidates:
-        key = normalize_text(candidate)
 
-        if key in normalized_columns:
-            return normalized_columns[key]
+        candidate_normalized = (
+            normalize_text(
+                candidate
+            )
+        )
+
+        if (
+            candidate_normalized
+            in normalized_columns
+        ):
+
+            return normalized_columns[
+                candidate_normalized
+            ]
 
     return None
 
 
-def safe_filename(name):
-    """Membuat nama file aman untuk Windows/Linux."""
-    value = re.sub(r'[\\/*?:"<>|]', "_", str(name)).strip()
+# ============================================================
+# UPLOAD STATE HELPERS
+#
+# File disimpan sebagai bytes di session_state.
+# Dengan cara ini setelah file dipilih, native uploader
+# benar-benar tidak dirender lagi sehingga tidak ada
+# ruang kosong tersisa.
+# ============================================================
 
-    if not value:
-        value = "Unknown"
+def store_uploaded_file(
+    role,
+    uploaded_file
+):
 
-    return value[:150]
+    st.session_state[
+        f"{role}_file_bytes"
+    ] = uploaded_file.getvalue()
+
+    st.session_state[
+        f"{role}_file_name"
+    ] = uploaded_file.name
+
+
+def get_stored_file(
+    role
+):
+
+    file_bytes = (
+        st.session_state.get(
+            f"{role}_file_bytes"
+        )
+    )
+
+    file_name = (
+        st.session_state.get(
+            f"{role}_file_name"
+        )
+    )
+
+    if (
+        file_bytes is None
+        or file_name is None
+    ):
+
+        return None
+
+    file_buffer = io.BytesIO(
+        file_bytes
+    )
+
+    file_buffer.name = file_name
+
+    return file_buffer
+
+
+def clear_uploaded_file(
+    role
+):
+
+    st.session_state[
+        f"{role}_file_bytes"
+    ] = None
+
+    st.session_state[
+        f"{role}_file_name"
+    ] = None
 
 
 # ============================================================
-# MASTER PROCESSING
+# READ MASTER STRUCTURE
 # ============================================================
 
-def extract_indicator_master(master_wb):
+def read_master_indicators(
+    master_file
+):
+
+    if not master_file.exists():
+
+        raise FileNotFoundError(
+            "Master Template tidak ditemukan.\n\n"
+            f"Path:\n{master_file}\n\n"
+            "Pastikan file berada di folder:\n"
+            "data/master/"
+        )
+
+    master_wb = load_workbook(
+        master_file,
+        data_only=False
+    )
+
     indicator_master = []
 
-    for dimension_key, sheet_name in DIMENSIONS.items():
+    try:
 
-        if sheet_name not in master_wb.sheetnames:
-            raise ValueError(
-                f"Sheet master tidak ditemukan: '{sheet_name}'"
-            )
+        for (
+            dimension_key,
+            sheet_name
+        ) in DIMENSIONS.items():
 
-        ws = master_wb[sheet_name]
+            if (
+                sheet_name
+                not in master_wb.sheetnames
+            ):
 
-        for indicator_no, row in enumerate(
-            range(13, 23),
-            start=1,
-        ):
-            indicator = ws.cell(row, 2).value
-            question = ws.cell(row, 3).value
+                raise ValueError(
+                    f"Sheet '{sheet_name}' "
+                    "tidak ditemukan di Master."
+                )
 
-            levels = {
-                1: ws.cell(row, 4).value,
-                2: ws.cell(row, 5).value,
-                3: ws.cell(row, 6).value,
-                4: ws.cell(row, 7).value,
-                5: ws.cell(row, 8).value,
-            }
+            ws = master_wb[
+                sheet_name
+            ]
 
-            indicator_master.append({
-                "dimension": dimension_key,
-                "sheet_name": sheet_name,
-                "indicator_no": indicator_no,
-                "indicator_id": f"{dimension_key}_{indicator_no:02d}",
-                "indicator": indicator,
-                "question": question,
-                "question_normalized": normalize_text(question),
-                "level_1": levels[1],
-                "level_2": levels[2],
-                "level_3": levels[3],
-                "level_4": levels[4],
-                "level_5": levels[5],
-                "level_1_normalized": normalize_text(levels[1]),
-                "level_2_normalized": normalize_text(levels[2]),
-                "level_3_normalized": normalize_text(levels[3]),
-                "level_4_normalized": normalize_text(levels[4]),
-                "level_5_normalized": normalize_text(levels[5]),
-            })
+            for (
+                indicator_no,
+                row
+            ) in enumerate(
 
-    indicator_master_df = pd.DataFrame(indicator_master)
+                range(
+                    13,
+                    23
+                ),
 
-    if len(indicator_master_df) != 50:
+                start=1
+
+            ):
+
+                indicator = ws.cell(
+                    row,
+                    2
+                ).value
+
+                question = ws.cell(
+                    row,
+                    3
+                ).value
+
+                levels = {
+
+                    1:
+                        ws.cell(
+                            row,
+                            4
+                        ).value,
+
+                    2:
+                        ws.cell(
+                            row,
+                            5
+                        ).value,
+
+                    3:
+                        ws.cell(
+                            row,
+                            6
+                        ).value,
+
+                    4:
+                        ws.cell(
+                            row,
+                            7
+                        ).value,
+
+                    5:
+                        ws.cell(
+                            row,
+                            8
+                        ).value,
+
+                }
+
+                indicator_master.append({
+
+                    "dimension":
+                        dimension_key,
+
+                    "sheet_name":
+                        sheet_name,
+
+                    "indicator_no":
+                        indicator_no,
+
+                    "indicator_id":
+                        (
+                            f"{dimension_key}_"
+                            f"{indicator_no:02d}"
+                        ),
+
+                    "indicator":
+                        indicator,
+
+                    "question":
+                        question,
+
+                    "question_normalized":
+                        normalize_text(
+                            question
+                        ),
+
+                    "level_1":
+                        levels[1],
+
+                    "level_2":
+                        levels[2],
+
+                    "level_3":
+                        levels[3],
+
+                    "level_4":
+                        levels[4],
+
+                    "level_5":
+                        levels[5],
+
+                    "level_1_normalized":
+                        normalize_text(
+                            levels[1]
+                        ),
+
+                    "level_2_normalized":
+                        normalize_text(
+                            levels[2]
+                        ),
+
+                    "level_3_normalized":
+                        normalize_text(
+                            levels[3]
+                        ),
+
+                    "level_4_normalized":
+                        normalize_text(
+                            levels[4]
+                        ),
+
+                    "level_5_normalized":
+                        normalize_text(
+                            levels[5]
+                        ),
+                })
+
+    finally:
+
+        master_wb.close()
+
+    indicator_master_df = pd.DataFrame(
+        indicator_master
+    )
+
+    if len(
+        indicator_master_df
+    ) != 50:
+
         raise ValueError(
             "Master harus memiliki 50 indikator. "
             f"Ditemukan {len(indicator_master_df)}."
         )
 
-    if indicator_master_df["indicator_id"].nunique() != 50:
-        raise ValueError("Duplicate indicator_id ditemukan.")
+    if (
+        indicator_master_df[
+            "indicator_id"
+        ].nunique()
+        != 50
+    ):
 
-    if indicator_master_df["question_normalized"].nunique() != 50:
-        raise ValueError("Duplicate questions ditemukan.")
+        raise ValueError(
+            "Terdapat duplicate indicator_id pada Master."
+        )
+
+    if (
+        indicator_master_df[
+            "question_normalized"
+        ].nunique()
+        != 50
+    ):
+
+        raise ValueError(
+            "Terdapat duplicate question pada Master."
+        )
 
     for col in [
+
         "level_1",
         "level_2",
         "level_3",
         "level_4",
         "level_5",
-    ]:
-        missing = indicator_master_df[col].isna().sum()
 
-        if missing:
+    ]:
+
+        if (
+            indicator_master_df[
+                col
+            ]
+            .isna()
+            .sum()
+            != 0
+        ):
+
             raise ValueError(
-                f"{col} memiliki {missing} nilai kosong."
+                f"{col} pada Master masih memiliki data kosong."
             )
 
     return indicator_master_df
 
 
-def detect_question_columns(df, master_questions):
+# ============================================================
+# DETECT QUESTION COLUMNS
+# ============================================================
+
+def detect_question_columns(
+    df,
+    master_questions
+):
+
     master_question_set = {
+
         normalize_text(q)
+
         for q in master_questions
+
         if pd.notna(q)
+
     }
 
     question_columns = []
 
     for col in df.columns:
-        if normalize_text(col) in master_question_set:
-            question_columns.append(col)
+
+        normalized_col = normalize_text(
+            col
+        )
+
+        if (
+            normalized_col
+            in master_question_set
+        ):
+
+            question_columns.append(
+                col
+            )
 
     return question_columns
 
 
-def build_answer_mapping(indicator_master_df):
+# ============================================================
+# BUILD ANSWER MAPPING
+# ============================================================
+
+def build_answer_mapping(
+    indicator_master_df
+):
+
     answer_mapping = {}
 
     for _, row in indicator_master_df.iterrows():
 
-        question_key = row["question_normalized"]
-
-        answer_mapping[question_key] = {
-            normalize_text(row["level_1"]): 1,
-            normalize_text(row["level_2"]): 2,
-            normalize_text(row["level_3"]): 3,
-            normalize_text(row["level_4"]): 4,
-            normalize_text(row["level_5"]): 5,
-        }
-
-    if len(answer_mapping) != 50:
-        raise ValueError(
-            "Answer mapping hanya memiliki "
-            f"{len(answer_mapping)} question."
+        question_key = (
+            row[
+                "question_normalized"
+            ]
         )
+
+        answer_mapping[
+            question_key
+        ] = {
+
+            normalize_text(
+                row[
+                    "level_1"
+                ]
+            ): 1,
+
+            normalize_text(
+                row[
+                    "level_2"
+                ]
+            ): 2,
+
+            normalize_text(
+                row[
+                    "level_3"
+                ]
+            ): 3,
+
+            normalize_text(
+                row[
+                    "level_4"
+                ]
+            ): 4,
+
+            normalize_text(
+                row[
+                    "level_5"
+                ]
+            ): 5,
+
+        }
 
     return answer_mapping
 
 
 # ============================================================
-# RAW -> SCORED DATA
+# PROCESS ASSESSMENT
 # ============================================================
 
 def process_assessment(
@@ -288,843 +753,473 @@ def process_assessment(
     question_columns,
     rater_type,
     indicator_master_df,
-    answer_mapping,
+    answer_mapping
 ):
+
     results = []
 
     for _, row in df.iterrows():
 
         row_dict = {
-            normalize_text(k): v
+
+            normalize_text(k):
+                v
+
             for k, v in row.items()
+
         }
 
+        # ====================================================
+        # EMPLOYEE / SUPERIOR
+        # ====================================================
+
         if rater_type == "Self":
+
             employee_name = clean_value(
                 row.get(
                     "Nama",
-                    row_dict.get("nama", ""),
+                    row_dict.get(
+                        "nama",
+                        ""
+                    )
                 )
             )
 
             superior_name = ""
 
         else:
+
             employee_name = clean_value(
                 row.get(
                     "Nama bawahan yang dinilai",
                     row_dict.get(
                         "nama bawahan yang dinilai",
-                        "",
-                    ),
+                        ""
+                    )
                 )
             )
 
             superior_name = clean_value(
                 row.get(
                     "Nama",
-                    row_dict.get("nama", ""),
+                    row_dict.get(
+                        "nama",
+                        ""
+                    )
                 )
             )
+
+        # ====================================================
+        # IDENTITY
+        # ====================================================
 
         email = clean_value(
             row.get(
                 "Email",
-                row_dict.get("email", ""),
+                row_dict.get(
+                    "email",
+                    ""
+                )
             )
         )
 
         division = clean_value(
             row.get(
                 "Divisi",
-                row_dict.get("divisi", ""),
+                row_dict.get(
+                    "divisi",
+                    ""
+                )
             )
         )
 
         unit = clean_value(
             row.get(
                 "Unit",
-                row_dict.get("unit", ""),
+                row_dict.get(
+                    "unit",
+                    ""
+                )
             )
         )
 
         department = clean_value(
             row.get(
                 "Departemen",
-                row_dict.get("departemen", ""),
+                row_dict.get(
+                    "departemen",
+                    ""
+                )
             )
         )
 
         directorate = clean_value(
             row.get(
                 "Direktorat",
-                row_dict.get("direktorat", ""),
+                row_dict.get(
+                    "direktorat",
+                    ""
+                )
             )
         )
 
         current_level = clean_value(
             row.get(
                 "Level Saat Ini",
-                row_dict.get("level saat ini", ""),
+                row_dict.get(
+                    "level saat ini",
+                    ""
+                )
             )
         )
 
         target_level = clean_value(
             row.get(
                 "Level Tujuan",
-                row_dict.get("level tujuan", ""),
+                row_dict.get(
+                    "level tujuan",
+                    ""
+                )
             )
         )
 
         next_path = clean_value(
             row.get(
                 "Level Next Path",
-                row_dict.get("level next path", ""),
+                row_dict.get(
+                    "level next path",
+                    ""
+                )
             )
         )
 
         completion_time = row.get(
             "Completion time",
-            row_dict.get("completion time", None),
+            row_dict.get(
+                "completion time",
+                None
+            )
         )
 
         last_modified_time = row.get(
             "Last modified time",
-            row_dict.get("last modified time", None),
+            row_dict.get(
+                "last modified time",
+                None
+            )
         )
+
+        # ====================================================
+        # QUESTIONS
+        # ====================================================
 
         for question_col in question_columns:
 
-            question_normalized = normalize_text(question_col)
-            answer = row.get(question_col, "")
+            question_normalized = (
+                normalize_text(
+                    question_col
+                )
+            )
+
+            answer = row.get(
+                question_col,
+                ""
+            )
 
             if pd.isna(answer):
+
                 continue
 
-            answer_str = str(answer).strip()
+            answer_str = str(
+                answer
+            ).strip()
 
             if not answer_str:
+
                 continue
 
-            master_rows = indicator_master_df[
-                indicator_master_df["question_normalized"]
-                == question_normalized
-            ]
+            answer_normalized = (
+                normalize_text(
+                    answer_str
+                )
+            )
+
+            # =================================================
+            # FIND QUESTION
+            # =================================================
+
+            master_rows = (
+                indicator_master_df[
+                    indicator_master_df[
+                        "question_normalized"
+                    ]
+                    == question_normalized
+                ]
+            )
 
             if master_rows.empty:
+
                 results.append({
-                    "rater_type": rater_type,
-                    "employee_name": employee_name,
-                    "superior_name": superior_name,
-                    "email": email,
-                    "division": division,
-                    "unit": unit,
-                    "department": department,
-                    "directorate": directorate,
-                    "current_level": current_level,
-                    "target_level": target_level,
-                    "next_path": next_path,
-                    "completion_time": completion_time,
-                    "last_modified_time": last_modified_time,
-                    "question": question_col,
-                    "answer_text": answer_str,
-                    "rating": np.nan,
-                    "mapping_status": "QUESTION_NOT_FOUND",
-                    "indicator_id": "",
-                    "dimension": "",
-                    "indicator_no": np.nan,
-                    "indicator": "",
+
+                    "rater_type":
+                        rater_type,
+
+                    "employee_name":
+                        employee_name,
+
+                    "superior_name":
+                        superior_name,
+
+                    "email":
+                        email,
+
+                    "division":
+                        division,
+
+                    "unit":
+                        unit,
+
+                    "department":
+                        department,
+
+                    "directorate":
+                        directorate,
+
+                    "current_level":
+                        current_level,
+
+                    "target_level":
+                        target_level,
+
+                    "next_path":
+                        next_path,
+
+                    "completion_time":
+                        completion_time,
+
+                    "last_modified_time":
+                        last_modified_time,
+
+                    "question":
+                        question_col,
+
+                    "answer_text":
+                        answer_str,
+
+                    "rating":
+                        np.nan,
+
+                    "mapping_status":
+                        "QUESTION_NOT_FOUND",
+
+                    "indicator_id":
+                        "",
+
+                    "dimension":
+                        "",
+
+                    "indicator_no":
+                        np.nan,
+
+                    "indicator":
+                        "",
                 })
+
                 continue
 
-            master_row = master_rows.iloc[0]
+            master_row = (
+                master_rows.iloc[0]
+            )
 
-            rating = answer_mapping[
-                question_normalized
-            ].get(
-                normalize_text(answer_str),
-                np.nan,
+            # =================================================
+            # ANSWER -> RATING
+            # =================================================
+
+            rating = (
+                answer_mapping[
+                    question_normalized
+                ]
+                .get(
+                    answer_normalized,
+                    np.nan
+                )
             )
 
             mapping_status = (
+
                 "ANSWER_NOT_FOUND"
+
                 if pd.isna(rating)
+
                 else "MATCHED"
+
             )
 
             results.append({
-                "rater_type": rater_type,
-                "employee_name": employee_name,
-                "superior_name": superior_name,
-                "email": email,
-                "division": division,
-                "unit": unit,
-                "department": department,
-                "directorate": directorate,
-                "current_level": current_level,
-                "target_level": target_level,
-                "next_path": next_path,
-                "completion_time": completion_time,
-                "last_modified_time": last_modified_time,
-                "question": question_col,
-                "answer_text": answer_str,
-                "rating": rating,
-                "mapping_status": mapping_status,
-                "indicator_id": master_row["indicator_id"],
-                "dimension": master_row["dimension"],
-                "indicator_no": master_row["indicator_no"],
-                "indicator": master_row["indicator"],
+
+                "rater_type":
+                    rater_type,
+
+                "employee_name":
+                    employee_name,
+
+                "superior_name":
+                    superior_name,
+
+                "email":
+                    email,
+
+                "division":
+                    division,
+
+                "unit":
+                    unit,
+
+                "department":
+                    department,
+
+                "directorate":
+                    directorate,
+
+                "current_level":
+                    current_level,
+
+                "target_level":
+                    target_level,
+
+                "next_path":
+                    next_path,
+
+                "completion_time":
+                    completion_time,
+
+                "last_modified_time":
+                    last_modified_time,
+
+                "question":
+                    question_col,
+
+                "answer_text":
+                    answer_str,
+
+                "rating":
+                    rating,
+
+                "mapping_status":
+                    mapping_status,
+
+                "indicator_id":
+                    master_row[
+                        "indicator_id"
+                    ],
+
+                "dimension":
+                    master_row[
+                        "dimension"
+                    ],
+
+                "indicator_no":
+                    master_row[
+                        "indicator_no"
+                    ],
+
+                "indicator":
+                    master_row[
+                        "indicator"
+                    ],
             })
 
-    return pd.DataFrame(results)
-
-
-def calculate_scores(
-    self_scored_df,
-    superior_scored_df,
-    indicator_master_df,
-):
-    scored_answers_df = pd.concat(
-        [
-            self_scored_df,
-            superior_scored_df,
-        ],
-        ignore_index=True,
-    )
-
-    total_records = len(scored_answers_df)
-
-    matched_records = (
-        scored_answers_df[
-            scored_answers_df["mapping_status"] == "MATCHED"
-        ].shape[0]
-    )
-
-    unmatched_records = total_records - matched_records
-
-    coverage = (
-        matched_records / total_records
-        if total_records > 0
-        else 0
-    )
-
-    if (
-        not scored_answers_df.empty
-        and scored_answers_df["employee_name"]
-        .fillna("")
-        .astype(str)
-        .str.strip()
-        .eq("")
-        .any()
-    ):
-        raise ValueError(
-            "Ada record dengan employee_name kosong."
-        )
-
-    indicator_score_df = (
-        scored_answers_df[
-            scored_answers_df["mapping_status"] == "MATCHED"
-        ]
-        .groupby(
-            [
-                "rater_type",
-                "employee_name",
-                "indicator_id",
-            ],
-            as_index=False,
-        )["rating"]
-        .mean()
-        .rename(
-            columns={
-                "rating": "indicator_score",
-            }
-        )
-    )
-
-    indicator_score_df = indicator_score_df.merge(
-        indicator_master_df[
-            [
-                "indicator_id",
-                "dimension",
-                "indicator_no",
-                "indicator",
-            ]
-        ],
-        on="indicator_id",
-        how="left",
-    )
-
-    dimension_score_df = (
-        indicator_score_df
-        .groupby(
-            [
-                "rater_type",
-                "employee_name",
-                "dimension",
-            ],
-            as_index=False,
-        )["indicator_score"]
-        .mean()
-        .rename(
-            columns={
-                "indicator_score": "dimension_score",
-            }
-        )
-    )
-
-    dimension_gap_df = (
-        dimension_score_df
-        .pivot_table(
-            index=[
-                "employee_name",
-                "dimension",
-            ],
-            columns="rater_type",
-            values="dimension_score",
-        )
-        .reset_index()
-    )
-
-    if "Self" not in dimension_gap_df.columns:
-        dimension_gap_df["Self"] = np.nan
-
-    if "Superior" not in dimension_gap_df.columns:
-        dimension_gap_df["Superior"] = np.nan
-
-    dimension_gap_df["gap"] = (
-        dimension_gap_df["Self"]
-        - dimension_gap_df["Superior"]
-    )
-
-    return (
-        scored_answers_df,
-        indicator_score_df,
-        dimension_score_df,
-        dimension_gap_df,
-        total_records,
-        matched_records,
-        unmatched_records,
-        coverage,
+    return pd.DataFrame(
+        results
     )
 
 
 # ============================================================
-# EXACT MASTER PRESERVATION
+# PREPARE EMPLOYEE VALUES
 # ============================================================
 
-def _excel_value_xml(value):
-    """
-    Membuat XML value untuk cell target.
-
-    Penting:
-    - Tidak menyentuh style cell.
-    - Tidak menyentuh formula.
-    - Hanya mengganti isi cell target.
-    """
-    value = clean_excel_value(value)
-
-    if value is None:
-        return ""
-
-    if isinstance(value, bool):
-        return f"<v>{1 if value else 0}</v>"
-
-    if isinstance(value, (int, float, np.integer, np.floating)):
-        if isinstance(value, float) and np.isnan(value):
-            return ""
-
-        return f"<v>{value}</v>"
-
-    if isinstance(value, (datetime, date)):
-        serial = to_excel(value)
-        return f"<v>{serial}</v>"
-
-    if isinstance(value, dt_time):
-        fraction = (
-            value.hour * 3600
-            + value.minute * 60
-            + value.second
-            + value.microsecond / 1_000_000
-        ) / 86400
-
-        return f"<v>{fraction}</v>"
-
-    text_value = str(value)
-
-    # Excel XML inline string.
-    escaped = (
-        text_value
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-    )
-
-    if (
-        text_value.startswith(" ")
-        or text_value.endswith(" ")
-        or "\n" in text_value
-        or "\r" in text_value
-        or "\t" in text_value
-    ):
-        preserve = ' xml:space="preserve"'
-    else:
-        preserve = ""
-
-    return (
-        f'<is><t{preserve}>{escaped}</t></is>'
-    )
-
-
-def _patch_cell_xml(cell_xml, value):
-    """
-    Patch satu cell XML tanpa mengubah atribut cell.
-
-    Contoh:
-    <c r="D2" s="15"><v>old</v></c>
-
-    menjadi:
-    <c r="D2" s="15" t="inlineStr"><is><t>new</t></is></c>
-
-    atau angka:
-    <c r="I13" s="20"><v>4</v></c>
-
-    Atribut style (s="...") tetap dipertahankan.
-    """
-
-    # Ambil opening <c ...>
-    opening_match = re.match(
-        rb"(<c\b[^>]*)(>)",
-        cell_xml,
-    )
-
-    if not opening_match:
-        raise ValueError(
-            f"Format cell XML tidak dikenali: {cell_xml[:200]!r}"
-        )
-
-    opening = opening_match.group(1)
-    closing = opening_match.group(2)
-
-    # Hapus type lama jika ada.
-    opening = re.sub(
-        rb'\s+t="[^"]*"',
-        b"",
-        opening,
-    )
-
-    value = clean_excel_value(value)
-
-    if value is None:
-        # Cell kosong: pertahankan cell node dan style,
-        # tetapi hilangkan value.
-        new_opening = opening
-        new_body = b""
-
-    elif isinstance(value, bool):
-        new_opening = opening
-        new_body = (
-            b"<v>"
-            + (b"1" if value else b"0")
-            + b"</v>"
-        )
-
-    elif isinstance(value, (int, float, np.integer, np.floating)):
-        if isinstance(value, float) and np.isnan(value):
-            new_opening = opening
-            new_body = b""
-        else:
-            new_opening = opening
-            number_text = str(value).encode("utf-8")
-            new_body = b"<v>" + number_text + b"</v>"
-
-    elif isinstance(value, (datetime, date)):
-        new_opening = opening
-        number_text = str(to_excel(value)).encode("utf-8")
-        new_body = b"<v>" + number_text + b"</v>"
-
-    elif isinstance(value, dt_time):
-        new_opening = opening
-        fraction = (
-            value.hour * 3600
-            + value.minute * 60
-            + value.second
-            + value.microsecond / 1_000_000
-        ) / 86400
-
-        new_body = (
-            b"<v>"
-            + str(fraction).encode("utf-8")
-            + b"</v>"
-        )
-
-    else:
-        text_value = str(value)
-        escaped = (
-            text_value
-            .replace("&", "&amp;")
-            .replace("<", "&lt;")
-            .replace(">", "&gt;")
-        )
-
-        preserve = (
-            ' xml:space="preserve"'
-            if (
-                text_value.startswith(" ")
-                or text_value.endswith(" ")
-                or "\n" in text_value
-                or "\r" in text_value
-                or "\t" in text_value
-            )
-            else ""
-        )
-
-        new_opening = opening + b' t="inlineStr"'
-
-        new_body = (
-            f'<is><t{preserve}>{escaped}</t></is>'
-            .encode("utf-8")
-        )
-
-    return (
-        new_opening
-        + closing
-        + new_body
-        + b"</c>"
-    )
-
-
-def _patch_sheet_xml(
-    xml_bytes,
-    cell_values,
-):
-    """
-    Mengubah hanya cell target pada sheet XML.
-
-    Tidak melakukan parse + reserialize seluruh XML.
-    Ini penting karena kita ingin perubahan sekecil mungkin
-    terhadap master.
-    """
-
-    for coordinate, value in cell_values.items():
-
-        coordinate_bytes = coordinate.encode("utf-8")
-
-        # Cell normal:
-        # <c r="D2"...>...</c>
-        pattern = re.compile(
-            rb"<c\b(?=[^>]*\br=\""
-            + re.escape(coordinate_bytes)
-            + rb"\")[^>]*>.*?</c>",
-            re.DOTALL,
-        )
-
-        match = pattern.search(xml_bytes)
-
-        if match:
-            old_cell = match.group(0)
-            new_cell = _patch_cell_xml(
-                old_cell,
-                value,
-            )
-
-            xml_bytes = (
-                xml_bytes[:match.start()]
-                + new_cell
-                + xml_bytes[match.end():]
-            )
-
-            continue
-
-        # Jika cell target benar-benar kosong dan tidak mempunyai
-        # node <c>, kita perlu membuat node baru.
-        # Ini tetap dilakukan hanya pada target cell.
-        row_number_match = re.match(
-            r"([A-Z]+)(\d+)$",
-            coordinate,
-        )
-
-        if not row_number_match:
-            raise ValueError(
-                f"Coordinate Excel tidak valid: {coordinate}"
-            )
-
-        row_number = row_number_match.group(2)
-
-        row_pattern = re.compile(
-            rb"<row\b(?=[^>]*\br=\""
-            + re.escape(row_number.encode("utf-8"))
-            + rb"\")[^>]*>.*?</row>",
-            re.DOTALL,
-        )
-
-        row_match = row_pattern.search(xml_bytes)
-
-        if not row_match:
-            raise ValueError(
-                f"Row {row_number} tidak ditemukan "
-                "di worksheet XML."
-            )
-
-        row_xml = row_match.group(0)
-
-        # Untuk cell yang belum ada, kita tambahkan node tanpa
-        # style karena memang tidak ada cell master sebelumnya.
-        # Dalam master yang normal, input cells seharusnya sudah
-        # memiliki style/node.
-        new_cell = (
-            f'<c r="{coordinate}" '
-            f't="inlineStr">'
-            f'</c>'
-        ).encode("utf-8")
-
-        # Sisipkan sebelum </row>.
-        new_row_xml = (
-            row_xml[:-6]
-            + new_cell
-            + b"</row>"
-        )
-
-        xml_bytes = (
-            xml_bytes[:row_match.start()]
-            + new_row_xml
-            + xml_bytes[row_match.end():]
-        )
-
-    return xml_bytes
-
-
-def get_sheet_xml_paths(xlsx_path):
-    """
-    Mendapatkan mapping nama sheet Excel -> path XML worksheet
-    berdasarkan workbook.xml + relationships.
-
-    Tidak mengubah file.
-    """
-    with zipfile.ZipFile(
-        xlsx_path,
-        "r",
-    ) as zf:
-
-        workbook_xml = zf.read(
-            "xl/workbook.xml"
-        )
-
-        rels_xml = zf.read(
-            "xl/_rels/workbook.xml.rels"
-        )
-
-    workbook_match = re.search(
-        rb"<workbook[^>]*xmlns=\"([^\"]+)\"",
-        workbook_xml,
-    )
-
-    if workbook_match:
-        workbook_xml_clean = workbook_xml
-    else:
-        workbook_xml_clean = workbook_xml
-
-    # Extract sheet name + relationship ID.
-    sheet_pattern = re.compile(
-        rb"<sheet\b[^>]*\bname=\"([^\"]+)\""
-        rb"[^>]*\br:id=\"([^\"]+)\"[^>]*/?>"
-    )
-
-    sheets = sheet_pattern.findall(
-        workbook_xml_clean
-    )
-
-    # Extract relationship ID + target.
-    rel_pattern = re.compile(
-        rb"<Relationship\b[^>]*\bId=\"([^\"]+)\""
-        rb"[^>]*\bTarget=\"([^\"]+)\"[^>]*/?>"
-    )
-
-    relationships = {
-        rel_id.decode("utf-8"): target.decode("utf-8")
-        for rel_id, target in rel_pattern.findall(rels_xml)
-    }
-
-    result = {}
-
-    for sheet_name_bytes, rel_id_bytes in sheets:
-        sheet_name = sheet_name_bytes.decode(
-            "utf-8"
-        )
-        rel_id = rel_id_bytes.decode(
-            "utf-8"
-        )
-
-        target = relationships.get(rel_id)
-
-        if target is None:
-            raise ValueError(
-                f"Relationship sheet '{sheet_name}' "
-                f"tidak ditemukan."
-            )
-
-        if target.startswith("/"):
-            target = target.lstrip("/")
-
-        elif not target.startswith("xl/"):
-            target = "xl/" + target
-
-        result[sheet_name] = target
-
-    return result
-
-
-def patch_master_exactly(
-    master_file,
-    output_file,
-    changes_by_sheet,
-):
-    """
-    CORE FUNCTION.
-
-    Membuat output berdasarkan ZIP master dan hanya mengganti
-    value pada cell yang memang diizinkan.
-
-    Semua entry ZIP lain disalin dari master tanpa disentuh.
-    Ini jauh lebih aman untuk mempertahankan:
-    - formula
-    - style
-    - merged cells
-    - chart
-    - image
-    - drawing
-    - conditional formatting
-    - named range
-    - workbook settings
-    - print settings
-    - page layout
-    - hidden sheets
-    - metadata
-    - dan struktur XML lain
-
-    dibanding membuka lalu save ulang seluruh workbook dengan
-    openpyxl.
-    """
-
-    sheet_paths = get_sheet_xml_paths(
-        master_file
-    )
-
-    # Pastikan semua target sheet tersedia.
-    for sheet_name in changes_by_sheet:
-
-        if sheet_name not in sheet_paths:
-            raise ValueError(
-                f"Sheet '{sheet_name}' tidak ditemukan "
-                "di master."
-            )
-
-    with zipfile.ZipFile(
-        master_file,
-        "r",
-    ) as source_zip:
-
-        with zipfile.ZipFile(
-            output_file,
-            "w",
-            compression=zipfile.ZIP_DEFLATED,
-            compresslevel=6,
-        ) as target_zip:
-
-            for item in source_zip.infolist():
-
-                data = source_zip.read(
-                    item.filename
-                )
-
-                # Hanya worksheet XML target yang dipatch.
-                affected_sheets = [
-                    sheet_name
-                    for sheet_name, sheet_path
-                    in sheet_paths.items()
-                    if sheet_path == item.filename
-                    and sheet_name in changes_by_sheet
-                ]
-
-                if affected_sheets:
-                    for sheet_name in affected_sheets:
-                        data = _patch_sheet_xml(
-                            data,
-                            changes_by_sheet[sheet_name],
-                        )
-
-                target_zip.writestr(
-                    item,
-                    data,
-                )
-
-
-# ============================================================
-# BUILD EMPLOYEE CHANGES
-# ============================================================
-
-def build_employee_changes(
+def prepare_employee_values(
     employee_name,
     scored_answers,
     df_self,
-    df_superior,
+    df_superior
 ):
-    """
-    Menghasilkan daftar cell yang memang boleh berubah.
-
-    Fungsi ini TIDAK menyentuh workbook.
-    """
 
     target_employee = normalize_text(
         employee_name
     )
 
-    employee_data = scored_answers[
-        scored_answers["employee_name"]
-        .apply(normalize_text)
-        == target_employee
-    ].copy()
+    employee_data = (
+        scored_answers[
+            scored_answers[
+                "employee_name"
+            ]
+            .apply(
+                normalize_text
+            )
+            == target_employee
+        ]
+        .copy()
+    )
 
     if employee_data.empty:
+
         raise ValueError(
-            f"Tidak ada data assessment untuk employee: "
+            "Tidak ada data assessment untuk employee: "
             f"{employee_name}"
         )
 
-    changes = {
-        "Identitas": {},
+    values = {
+        "Identitas": {}
     }
 
-    for sheet_name in ASSESSMENT_SHEETS:
-        changes[sheet_name] = {}
+    # ========================================================
+    # D2 — EMPLOYEE
+    # ========================================================
 
-    # --------------------------------------------------------
-    # IDENTITAS
-    # --------------------------------------------------------
+    values[
+        "Identitas"
+    ][
+        "D2"
+    ] = employee_name
 
-    changes["Identitas"]["D2"] = employee_name
+    # ========================================================
+    # SELF RAW
+    # ========================================================
 
     self_raw = pd.DataFrame()
 
-    if df_self is not None and not df_self.empty:
+    if (
+        df_self is not None
+        and not df_self.empty
+    ):
 
         self_name_col = find_column(
             df_self,
             [
                 "Nama",
-                "Name",
-            ],
+                "Name"
+            ]
         )
 
         if self_name_col is not None:
-            self_raw = df_self[
-                df_self[self_name_col]
-                .apply(normalize_text)
-                == target_employee
-            ].copy()
 
-    # --------------------------------------------------------
-    # NAMA ATASAN
-    # --------------------------------------------------------
+            self_raw = (
+                df_self[
+                    df_self[
+                        self_name_col
+                    ]
+                    .apply(
+                        normalize_text
+                    )
+                    == target_employee
+                ]
+                .copy()
+            )
+
+    # ========================================================
+    # SUPERIOR
+    # ========================================================
 
     superior_name = None
 
@@ -1138,1537 +1233,3975 @@ def build_employee_changes(
             [
                 "Nama bawahan yang dinilai",
                 "Nama Bawahan",
-                "Bawahan",
-            ],
+                "Bawahan"
+            ]
         )
 
         if subordinate_col is not None:
 
-            superior_employee_data = df_superior[
-                df_superior[subordinate_col]
-                .apply(normalize_text)
-                == target_employee
-            ].copy()
+            superior_employee_data = (
+                df_superior[
+                    df_superior[
+                        subordinate_col
+                    ]
+                    .apply(
+                        normalize_text
+                    )
+                    == target_employee
+                ]
+                .copy()
+            )
 
-            if not superior_employee_data.empty:
+            if (
+                not superior_employee_data.empty
+            ):
 
-                superior_name_col = find_column(
-                    df_superior,
-                    [
-                        "Nama",
-                        "Name",
-                        "Nama atasan yang menilai",
-                        "Nama atasan",
-                        "Nama superior",
-                        "Superior Name",
-                    ],
-                )
-
-                if superior_name_col is not None:
-                    superior_name = clean_excel_value(
-                        superior_employee_data.iloc[0][
-                            superior_name_col
+                superior_name_col = (
+                    find_column(
+                        df_superior,
+                        [
+                            "Nama",
+                            "Name",
+                            "Nama atasan yang menilai",
+                            "Nama atasan",
+                            "Nama superior",
+                            "Superior Name"
                         ]
                     )
+                )
 
-    changes["Identitas"]["D3"] = superior_name
+                if (
+                    superior_name_col
+                    is not None
+                ):
 
-    # --------------------------------------------------------
+                    superior_name = (
+                        clean_excel_value(
+                            superior_employee_data.iloc[
+                                0
+                            ][
+                                superior_name_col
+                            ]
+                        )
+                    )
+
+    values[
+        "Identitas"
+    ][
+        "D3"
+    ] = superior_name
+
+    # ========================================================
     # IDENTITY MAPPING
-    # --------------------------------------------------------
+    # ========================================================
 
     identity_mapping = {
+
         "D4": [
             "Level Saat Ini",
             "Level saat ini",
-            "Current Level",
+            "Current Level"
         ],
+
         "D5": [
             "Level Tujuan",
             "Level tujuan",
-            "Target Level",
+            "Target Level"
         ],
+
         "D6": [
             "Tanggal Assesment",
             "Tanggal Assessment",
             "Assessment Date",
             "Completion time",
             "Start time",
-            "Last modified time",
+            "Last modified time"
         ],
+
         "D7": [
-            "Unit",
+            "Unit"
         ],
+
         "D8": [
             "Departemen",
-            "Department",
+            "Department"
         ],
+
         "D9": [
             "Divisi",
-            "Division",
+            "Division"
         ],
+
         "D10": [
             "Direktorat",
-            "Directorate",
+            "Directorate"
         ],
+
         "D12": [
             "Level Next Path",
             "Next Path",
-            "Level Next",
+            "Level Next"
         ],
+
     }
+
+    # ========================================================
+    # FILL IDENTITY FROM SELF
+    # ========================================================
 
     if not self_raw.empty:
 
         self_row = self_raw.iloc[0]
 
-        for target_cell, candidates in identity_mapping.items():
+        for (
+            target_cell,
+            candidates
+        ) in identity_mapping.items():
 
             source_col = find_column(
                 self_raw,
-                candidates,
+                candidates
             )
 
             if source_col is None:
+
                 continue
 
             value = clean_excel_value(
-                self_row[source_col]
+                self_row[
+                    source_col
+                ]
             )
 
             if value is None:
+
                 continue
 
-            changes["Identitas"][
+            if target_cell == "D6":
+
+                if isinstance(
+                    value,
+                    pd.Timestamp
+                ):
+
+                    value = (
+                        value.to_pydatetime()
+                    )
+
+            values[
+                "Identitas"
+            ][
                 target_cell
             ] = value
 
-    # --------------------------------------------------------
+    # ========================================================
     # 5 DIMENSIONS
-    # --------------------------------------------------------
+    # ========================================================
 
-    for dimension_key, sheet_name in DIMENSIONS.items():
+    for (
+        dimension_key,
+        sheet_name
+    ) in DIMENSIONS.items():
 
-        dimension_data = employee_data[
-            employee_data["dimension"]
-            == dimension_key
-        ].copy()
+        values[
+            sheet_name
+        ] = {}
 
-        for indicator_no, row in enumerate(
+        dimension_data = (
+            employee_data[
+                employee_data[
+                    "dimension"
+                ]
+                == dimension_key
+            ]
+            .copy()
+        )
+
+        for (
+            indicator_no,
+            row
+        ) in enumerate(
             ASSESSMENT_ROWS,
-            start=1,
+            start=1
         ):
 
             indicator_id = (
-                f"{dimension_key}_{indicator_no:02d}"
+                f"{dimension_key}_"
+                f"{indicator_no:02d}"
             )
 
-            indicator_data = dimension_data[
-                dimension_data["indicator_id"]
-                == indicator_id
-            ].copy()
+            indicator_data = (
+                dimension_data[
+                    dimension_data[
+                        "indicator_id"
+                    ]
+                    == indicator_id
+                ]
+                .copy()
+            )
 
-            # ------------------------------------------------
-            # SELF
-            # ------------------------------------------------
+            # =================================================
+            # SELF RATING
+            # =================================================
 
-            self_data = indicator_data[
-                indicator_data["rater_type"] == "Self"
-            ].copy()
+            self_data = (
+                indicator_data[
+                    indicator_data[
+                        "rater_type"
+                    ]
+                    == "Self"
+                ]
+                .copy()
+            )
 
             self_rating = None
 
             if not self_data.empty:
 
-                ratings = pd.to_numeric(
-                    self_data["rating"],
-                    errors="coerce",
-                ).dropna()
+                ratings = (
+                    pd.to_numeric(
+                        self_data[
+                            "rating"
+                        ],
+                        errors="coerce"
+                    )
+                    .dropna()
+                )
 
                 if not ratings.empty:
-                    self_rating = ratings.iloc[0]
 
-            changes[sheet_name][
+                    self_rating = (
+                        ratings.iloc[0]
+                    )
+
+            self_rating = clean_excel_value(
+                self_rating
+            )
+
+            values[
+                sheet_name
+            ][
                 f"I{row}"
             ] = self_rating
+
+            # =================================================
+            # SELF COMMENT
+            # =================================================
 
             self_comment = None
 
             if not self_data.empty:
 
                 self_answers = (
-                    self_data["answer_text"]
+                    self_data[
+                        "answer_text"
+                    ]
                     .dropna()
                     .astype(str)
                     .str.strip()
                 )
 
-                self_answers = self_answers[
-                    self_answers != ""
-                ]
+                self_answers = (
+                    self_answers[
+                        self_answers != ""
+                    ]
+                )
 
                 if not self_answers.empty:
-                    self_comment = "\n".join(
-                        self_answers.tolist()
+
+                    self_comment = (
+                        "\n".join(
+                            self_answers.tolist()
+                        )
                     )
 
-            changes[sheet_name][
+            values[
+                sheet_name
+            ][
                 f"J{row}"
-            ] = self_comment
+            ] = clean_excel_value(
+                self_comment
+            )
 
-            # ------------------------------------------------
-            # SUPERIOR
-            # ------------------------------------------------
+            # =================================================
+            # SUPERIOR RATING
+            # =================================================
 
-            superior_data = indicator_data[
-                indicator_data["rater_type"]
-                == "Superior"
-            ].copy()
+            superior_data = (
+                indicator_data[
+                    indicator_data[
+                        "rater_type"
+                    ]
+                    == "Superior"
+                ]
+                .copy()
+            )
 
             superior_rating = None
 
             if not superior_data.empty:
 
-                ratings = pd.to_numeric(
-                    superior_data["rating"],
-                    errors="coerce",
-                ).dropna()
+                ratings = (
+                    pd.to_numeric(
+                        superior_data[
+                            "rating"
+                        ],
+                        errors="coerce"
+                    )
+                    .dropna()
+                )
 
                 if not ratings.empty:
-                    superior_rating = ratings.iloc[0]
 
-            changes[sheet_name][
+                    superior_rating = (
+                        ratings.iloc[0]
+                    )
+
+            superior_rating = clean_excel_value(
+                superior_rating
+            )
+
+            values[
+                sheet_name
+            ][
                 f"K{row}"
             ] = superior_rating
+
+            # =================================================
+            # SUPERIOR COMMENT
+            # =================================================
 
             superior_comment = None
 
             if not superior_data.empty:
 
                 superior_answers = (
-                    superior_data["answer_text"]
+                    superior_data[
+                        "answer_text"
+                    ]
                     .dropna()
                     .astype(str)
                     .str.strip()
                 )
 
-                superior_answers = superior_answers[
-                    superior_answers != ""
-                ]
+                superior_answers = (
+                    superior_answers[
+                        superior_answers != ""
+                    ]
+                )
 
                 if not superior_answers.empty:
-                    superior_comment = "\n".join(
-                        superior_answers.tolist()
+
+                    superior_comment = (
+                        "\n".join(
+                            superior_answers.tolist()
+                        )
                     )
 
-            changes[sheet_name][
+            values[
+                sheet_name
+            ][
                 f"L{row}"
-            ] = superior_comment
+            ] = clean_excel_value(
+                superior_comment
+            )
 
-    return changes
+    return values
 
 
 # ============================================================
-# VALIDATION
+# WRITE VALUES USING MICROSOFT EXCEL COM
 # ============================================================
 
-def get_master_structure(master_file):
-    wb = load_workbook(
-        master_file,
-        data_only=False,
-        read_only=False,
-    )
-
-    try:
-        structure = {}
-
-        for sheet_name in wb.sheetnames:
-
-            ws = wb[sheet_name]
-
-            structure[sheet_name] = {
-                "max_row": ws.max_row,
-                "max_column": ws.max_column,
-                "merged_ranges": tuple(
-                    sorted(
-                        str(rng)
-                        for rng in ws.merged_cells.ranges
-                    )
-                ),
-            }
-
-        return structure
-
-    finally:
-        wb.close()
-
-
-def get_formula_snapshot(file_path):
-    wb = load_workbook(
-        file_path,
-        data_only=False,
-        read_only=False,
-    )
-
-    try:
-        formulas = {}
-
-        for sheet_name in wb.sheetnames:
-
-            ws = wb[sheet_name]
-            sheet_formulas = {}
-
-            for row in ws.iter_rows():
-
-                for cell in row:
-
-                    if (
-                        isinstance(cell.value, str)
-                        and cell.value.startswith("=")
-                    ):
-                        sheet_formulas[
-                            cell.coordinate
-                        ] = cell.value
-
-            formulas[sheet_name] = sheet_formulas
-
-        return formulas
-
-    finally:
-        wb.close()
-
-
-def normalize_formula(formula):
-    if not isinstance(formula, str):
-        return formula
-
-    formula = formula.replace("\n", "")
-    formula = formula.replace("\r", "")
-    formula = re.sub(r"\s+", "", formula)
-
-    return formula
-
-
-def validate_formula_preservation(
+def write_values_with_excel(
     output_file,
-    master_formulas,
+    employee_values
 ):
-    output_formulas = get_formula_snapshot(
-        output_file
-    )
-
-    if set(output_formulas.keys()) != set(
-        master_formulas.keys()
-    ):
-        return {
-            "status": "FAILED",
-            "reason": "Formula sheet structure changed.",
-        }
-
-    differences = []
-
-    for sheet_name in master_formulas:
-
-        master_sheet = master_formulas[
-            sheet_name
-        ]
-
-        output_sheet = output_formulas[
-            sheet_name
-        ]
-
-        if len(master_sheet) != len(
-            output_sheet
-        ):
-            return {
-                "status": "FAILED",
-                "reason": (
-                    f"{sheet_name}: formula count changed. "
-                    f"Master={len(master_sheet)}, "
-                    f"Output={len(output_sheet)}"
-                ),
-                "differences": differences,
-            }
-
-        for coordinate, master_formula in (
-            master_sheet.items()
-        ):
-
-            output_formula = output_sheet.get(
-                coordinate
-            )
-
-            if output_formula is None:
-                differences.append({
-                    "sheet": sheet_name,
-                    "cell": coordinate,
-                    "master": master_formula,
-                    "output": None,
-                })
-                continue
-
-            if (
-                normalize_formula(master_formula)
-                != normalize_formula(output_formula)
-            ):
-                differences.append({
-                    "sheet": sheet_name,
-                    "cell": coordinate,
-                    "master": master_formula,
-                    "output": output_formula,
-                })
-
-    if differences:
-        return {
-            "status": "FAILED",
-            "reason": (
-                f"Ditemukan {len(differences)} "
-                "formula yang berbeda."
-            ),
-            "differences": differences,
-        }
-
-    return {
-        "status": "PASSED",
-        "reason": "All master formulas preserved.",
-        "differences": [],
-    }
-
-
-def validate_output_structure(
-    output_file,
-    master_structure,
-):
-    wb = load_workbook(
-        output_file,
-        data_only=False,
-        read_only=False,
-    )
 
     try:
 
-        if wb.sheetnames != list(
-            master_structure.keys()
-        ):
-            return {
-                "status": "FAILED",
-                "reason": "Sheet structure changed.",
-            }
+        import pythoncom
+        import win32com.client as win32
 
-        for sheet_name, master_info in (
-            master_structure.items()
-        ):
+    except ImportError:
 
-            ws = wb[sheet_name]
+        raise ImportError(
+            "Library pywin32 belum terinstall.\n\n"
+            "Install dengan:\n"
+            "pip install pywin32"
+        )
 
-            if ws.max_row != master_info["max_row"]:
-                return {
-                    "status": "FAILED",
-                    "reason": (
-                        f"{sheet_name}: max_row changed."
-                    ),
-                }
+    excel = None
+    workbook = None
 
-            if (
-                ws.max_column
-                != master_info["max_column"]
-            ):
-                return {
-                    "status": "FAILED",
-                    "reason": (
-                        f"{sheet_name}: "
-                        "max_column changed."
-                    ),
-                }
+    # ========================================================
+    # INITIALIZE COM
+    # ========================================================
 
-            output_merged = tuple(
-                sorted(
-                    str(rng)
-                    for rng in ws.merged_cells.ranges
-                )
-            )
-
-            if (
-                output_merged
-                != master_info["merged_ranges"]
-            ):
-                return {
-                    "status": "FAILED",
-                    "reason": (
-                        f"{sheet_name}: "
-                        "merged cells changed."
-                    ),
-                }
-
-        return {
-            "status": "PASSED",
-            "reason": "Structure preserved.",
-        }
-
-    finally:
-        wb.close()
-
-
-def get_input_font_snapshot(file_path):
-    wb = load_workbook(
-        file_path,
-        data_only=False,
-        read_only=False,
-    )
-
-    result = {}
+    pythoncom.CoInitialize()
 
     try:
 
-        ws = wb["Identitas"]
+        # ====================================================
+        # START EXCEL
+        # ====================================================
 
-        for cell_address in IDENTITY_INPUT_CELLS:
-
-            cell = ws[cell_address]
-
-            result[
-                ("Identitas", cell_address)
-            ] = {
-                "font_name": cell.font.name,
-                "font_size": cell.font.sz,
-                "bold": cell.font.bold,
-                "italic": cell.font.italic,
-                "underline": cell.font.underline,
-                "strike": cell.font.strike,
-            }
-
-        for sheet_name in ASSESSMENT_SHEETS:
-
-            ws = wb[sheet_name]
-
-            for row in ASSESSMENT_ROWS:
-
-                for column_number in (
-                    ASSESSMENT_INPUT_COLUMNS.values()
-                ):
-
-                    cell = ws.cell(
-                        row=row,
-                        column=column_number,
-                    )
-
-                    result[
-                        (
-                            sheet_name,
-                            cell.coordinate,
-                        )
-                    ] = {
-                        "font_name": cell.font.name,
-                        "font_size": cell.font.sz,
-                        "bold": cell.font.bold,
-                        "italic": cell.font.italic,
-                        "underline": cell.font.underline,
-                        "strike": cell.font.strike,
-                    }
-
-        return result
-
-    finally:
-        wb.close()
-
-
-def validate_input_font_preservation(
-    output_file,
-    master_fonts,
-):
-    output_fonts = get_input_font_snapshot(
-        output_file
-    )
-
-    differences = []
-
-    if set(output_fonts.keys()) != set(
-        master_fonts.keys()
-    ):
-        return {
-            "status": "FAILED",
-            "reason": "Jumlah / daftar input cell berubah.",
-            "differences": [],
-        }
-
-    for key, master_font in (
-        master_fonts.items()
-    ):
-
-        output_font = output_fonts.get(key)
-
-        if output_font != master_font:
-            differences.append({
-                "sheet": key[0],
-                "cell": key[1],
-                "master": master_font,
-                "output": output_font,
-            })
-
-    if differences:
-        return {
-            "status": "FAILED",
-            "reason": (
-                f"Ditemukan {len(differences)} "
-                "input cell dengan font berbeda."
-            ),
-            "differences": differences,
-        }
-
-    return {
-        "status": "PASSED",
-        "reason": (
-            "Semua font input cell sesuai dengan master."
-        ),
-        "differences": [],
-    }
-
-
-def validate_only_allowed_cells_changed(
-    master_file,
-    output_file,
-    allowed_cells,
-):
-    """
-    Validasi paling penting.
-
-    Membandingkan value/formula setiap cell master vs output.
-
-    Perbedaan hanya boleh terjadi pada cell yang memang
-    dikerjakan Python.
-    """
-
-    master_wb = load_workbook(
-        master_file,
-        data_only=False,
-        read_only=False,
-    )
-
-    output_wb = load_workbook(
-        output_file,
-        data_only=False,
-        read_only=False,
-    )
-
-    differences = []
-
-    try:
-
-        if master_wb.sheetnames != output_wb.sheetnames:
-            return {
-                "status": "FAILED",
-                "reason": "Daftar sheet berubah.",
-                "differences": [],
-            }
-
-        for sheet_name in master_wb.sheetnames:
-
-            master_ws = master_wb[sheet_name]
-            output_ws = output_wb[sheet_name]
-
-            max_row = max(
-                master_ws.max_row,
-                output_ws.max_row,
-            )
-
-            max_col = max(
-                master_ws.max_column,
-                output_ws.max_column,
-            )
-
-            allowed = allowed_cells.get(
-                sheet_name,
-                set(),
-            )
-
-            for row in range(
-                1,
-                max_row + 1,
-            ):
-                for col in range(
-                    1,
-                    max_col + 1,
-                ):
-
-                    master_value = master_ws.cell(
-                        row=row,
-                        column=col,
-                    ).value
-
-                    output_value = output_ws.cell(
-                        row=row,
-                        column=col,
-                    ).value
-
-                    if master_value != output_value:
-
-                        coordinate = (
-                            output_ws.cell(
-                                row=row,
-                                column=col,
-                            ).coordinate
-                        )
-
-                        if coordinate not in allowed:
-
-                            differences.append({
-                                "sheet": sheet_name,
-                                "cell": coordinate,
-                                "master": master_value,
-                                "output": output_value,
-                            })
-
-        if differences:
-            return {
-                "status": "FAILED",
-                "reason": (
-                    f"Ada {len(differences)} cell "
-                    "di luar area yang diizinkan berubah."
-                ),
-                "differences": differences[:100],
-            }
-
-        return {
-            "status": "PASSED",
-            "reason": (
-                "Tidak ada cell di luar area Python "
-                "yang berubah."
-            ),
-            "differences": [],
-        }
-
-    finally:
-        master_wb.close()
-        output_wb.close()
-
-
-def validate_employee_output(
-    output_file,
-    employee_name,
-):
-    wb = load_workbook(
-        output_file,
-        data_only=False,
-        read_only=False,
-    )
-
-    try:
-
-        ws_identity = wb["Identitas"]
-        errors = []
-
-        output_name = ws_identity["D2"].value
-
-        if normalize_text(output_name) != normalize_text(
-            employee_name
-        ):
-            errors.append(
-                "Identitas!D2 tidak sesuai employee."
-            )
-
-        for sheet_name in ASSESSMENT_SHEETS:
-
-            if sheet_name not in wb.sheetnames:
-                errors.append(
-                    f"Sheet {sheet_name} tidak ditemukan."
-                )
-
-        if errors:
-            return {
-                "status": "FAILED",
-                "errors": errors,
-            }
-
-        return {
-            "status": "PASSED",
-            "errors": [],
-        }
-
-    finally:
-        wb.close()
-
-
-# ============================================================
-# INITIALIZE MASTER
-# ============================================================
-
-@st.cache_resource
-def load_master_metadata():
-
-    if not MASTER_FILE.exists():
-        raise FileNotFoundError(
-            "Template master tidak ditemukan. "
-            f"Letakkan file Excel master di:\n{MASTER_FILE}"
+        excel = win32.DispatchEx(
+            "Excel.Application"
         )
 
-    wb = load_workbook(
-        MASTER_FILE,
-        data_only=False,
-    )
-
-    indicator_master_df = extract_indicator_master(
-        wb
-    )
-
-    wb.close()
-
-    master_structure = get_master_structure(
-        MASTER_FILE
-    )
-
-    master_formulas = get_formula_snapshot(
-        MASTER_FILE
-    )
-
-    master_fonts = get_input_font_snapshot(
-        MASTER_FILE
-    )
-
-    answer_mapping = build_answer_mapping(
-        indicator_master_df
-    )
-
-    return (
-        indicator_master_df,
-        answer_mapping,
-        master_structure,
-        master_formulas,
-        master_fonts,
-    )
-
-
-# ============================================================
-# GENERATE ALL EMPLOYEE FILES
-# ============================================================
-
-def generate_all_files(
-    df_self,
-    df_superior,
-    master_file,
-    indicator_master_df,
-    answer_mapping,
-    master_structure,
-    master_formulas,
-    master_fonts,
-    validation_enabled=True,
-):
-
-    master_questions = indicator_master_df[
-        "question"
-    ].tolist()
-
-    # --------------------------------------------------------
-    # DETECT QUESTIONS
-    # --------------------------------------------------------
-
-    self_question_cols = detect_question_columns(
-        df_self,
-        master_questions,
-    )
-
-    superior_question_cols = detect_question_columns(
-        df_superior,
-        master_questions,
-    )
-
-    if len(self_question_cols) != 50:
-        raise ValueError(
-            "Self Assessment memiliki "
-            f"{len(self_question_cols)} pertanyaan yang cocok "
-            "dengan master. Expected: 50."
-        )
-
-    if len(superior_question_cols) != 50:
-        raise ValueError(
-            "Superior Assessment memiliki "
-            f"{len(superior_question_cols)} pertanyaan yang cocok "
-            "dengan master. Expected: 50."
-        )
-
-    # --------------------------------------------------------
-    # PROCESS SELF
-    # --------------------------------------------------------
-
-    self_scored_df = process_assessment(
-        df=df_self,
-        question_columns=self_question_cols,
-        rater_type="Self",
-        indicator_master_df=indicator_master_df,
-        answer_mapping=answer_mapping,
-    )
-
-    # --------------------------------------------------------
-    # PROCESS SUPERIOR
-    # --------------------------------------------------------
-
-    superior_scored_df = process_assessment(
-        df=df_superior,
-        question_columns=superior_question_cols,
-        rater_type="Superior",
-        indicator_master_df=indicator_master_df,
-        answer_mapping=answer_mapping,
-    )
-
-    # --------------------------------------------------------
-    # COMBINE + SCORE
-    # --------------------------------------------------------
-
-    (
-        scored_answers_df,
-        indicator_score_df,
-        dimension_score_df,
-        dimension_gap_df,
-        total_records,
-        matched_records,
-        unmatched_records,
-        coverage,
-    ) = calculate_scores(
-        self_scored_df,
-        superior_scored_df,
-        indicator_master_df,
-    )
-
-    # --------------------------------------------------------
-    # EMPLOYEE LIST
-    # --------------------------------------------------------
-
-    employees = sorted(
-        scored_answers_df[
-            scored_answers_df["rater_type"] == "Self"
-        ]["employee_name"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .loc[lambda s: s != ""]
-        .unique()
-    )
-
-    if len(employees) == 0:
-        raise ValueError(
-            "Tidak ada employee dari Self Assessment."
-        )
-
-    generated_files = []
-    failed_files = []
-
-    temp_dir = Path(
-        tempfile.mkdtemp(
-            prefix="learning_agility_"
-        )
-    )
-
-    output_dir = temp_dir / "results"
-
-    output_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    total_employees = len(employees)
-
-    for index, employee_name in enumerate(
-        employees,
-        start=1,
-    ):
-
-        employee_start = time.time()
-
-        output_file = (
-            output_dir
-            / (
-                "Learning_Agility_"
-                f"{safe_filename(employee_name)}.xlsx"
-            )
-        )
+        excel.Visible = False
+        excel.DisplayAlerts = False
 
         try:
 
-            # ------------------------------------------------
-            # BUILD ONLY THE CHANGES
-            # ------------------------------------------------
+            excel.AskToUpdateLinks = False
 
-            changes = build_employee_changes(
-                employee_name=employee_name,
-                scored_answers=scored_answers_df,
-                df_self=df_self,
-                df_superior=df_superior,
+        except Exception:
+
+            pass
+
+        # ====================================================
+        # OPEN COPIED MASTER
+        # ====================================================
+
+        workbook = excel.Workbooks.Open(
+            str(
+                output_file.resolve()
+            )
+        )
+
+        # ====================================================
+        # IDENTITAS
+        # ====================================================
+
+        ws_identity = workbook.Worksheets(
+            "Identitas"
+        )
+
+        for (
+            cell_address,
+            value
+        ) in employee_values[
+            "Identitas"
+        ].items():
+
+            ws_identity.Range(
+                cell_address
+            ).Value = value
+
+        # ====================================================
+        # 5 DIMENSIONS
+        # ====================================================
+
+        for sheet_name in ASSESSMENT_SHEETS:
+
+            worksheet = workbook.Worksheets(
+                sheet_name
             )
 
-            # ------------------------------------------------
-            # COPY MASTER + PATCH TARGET CELLS ONLY
-            # ------------------------------------------------
-
-            patch_master_exactly(
-                master_file=master_file,
-                output_file=output_file,
-                changes_by_sheet=changes,
+            sheet_values = (
+                employee_values.get(
+                    sheet_name,
+                    {}
+                )
             )
 
-            if (
-                not output_file.exists()
-                or output_file.stat().st_size == 0
-            ):
-                raise IOError(
-                    "Output Excel gagal dibuat atau kosong."
+            for (
+                cell_address,
+                value
+            ) in sheet_values.items():
+
+                worksheet.Range(
+                    cell_address
+                ).Value = value
+
+        # ====================================================
+        # SAVE
+        # ====================================================
+
+        workbook.Save()
+
+    except Exception as e:
+
+        raise RuntimeError(
+            "Gagal menulis data ke Excel.\n\n"
+            f"Detail: {e}\n\n"
+            "Pastikan Microsoft Excel terinstall "
+            "dan file Master tidak sedang dibuka "
+            "dengan mode yang mengunci file."
+        ) from e
+
+    finally:
+
+        # ====================================================
+        # CLOSE WORKBOOK
+        # ====================================================
+
+        if workbook is not None:
+
+            try:
+
+                workbook.Close(
+                    SaveChanges=False
                 )
 
-            # ------------------------------------------------
-            # VALIDATION
-            # ------------------------------------------------
+            except Exception:
 
-            if validation_enabled:
+                pass
 
-                structure_result = (
-                    validate_output_structure(
-                        output_file,
-                        master_structure,
-                    )
-                )
+        # ====================================================
+        # QUIT EXCEL
+        # ====================================================
 
-                if (
-                    structure_result["status"]
-                    != "PASSED"
-                ):
-                    raise ValueError(
-                        "Structure validation failed: "
-                        + structure_result["reason"]
-                    )
+        if excel is not None:
 
-                formula_result = (
-                    validate_formula_preservation(
-                        output_file,
-                        master_formulas,
-                    )
-                )
+            try:
 
-                if (
-                    formula_result["status"]
-                    != "PASSED"
-                ):
-                    raise ValueError(
-                        "Formula validation failed: "
-                        + formula_result["reason"]
-                    )
+                excel.Quit()
 
-                changed_cells_result = (
-                    validate_only_allowed_cells_changed(
-                        master_file,
-                        output_file,
-                        ALLOWED_OUTPUT_CELLS,
-                    )
-                )
+            except Exception:
 
-                if (
-                    changed_cells_result["status"]
-                    != "PASSED"
-                ):
-                    raise ValueError(
-                        "Unexpected workbook change: "
-                        + changed_cells_result["reason"]
-                    )
+                pass
 
-                employee_result = (
-                    validate_employee_output(
-                        output_file,
-                        employee_name,
-                    )
-                )
+        # ====================================================
+        # UNINITIALIZE COM
+        # ====================================================
 
-                if (
-                    employee_result["status"]
-                    != "PASSED"
-                ):
-                    raise ValueError(
-                        "Employee validation failed: "
-                        + str(
-                            employee_result["errors"]
-                        )
-                    )
+        try:
 
-                font_result = (
-                    validate_input_font_preservation(
-                        output_file,
-                        master_fonts,
-                    )
-                )
+            pythoncom.CoUninitialize()
 
-                if (
-                    font_result["status"]
-                    != "PASSED"
-                ):
-                    raise ValueError(
-                        "Input font validation failed: "
-                        + font_result["reason"]
-                    )
+        except Exception:
 
-            generated_files.append(
-                output_file
-            )
-
-        except Exception as exc:
-
-            failed_files.append({
-                "employee": employee_name,
-                "error": repr(exc),
-                "processing_time": (
-                    f"{time.time() - employee_start:.2f} sec"
-                ),
-            })
-
-        yield {
-            "index": index,
-            "total": total_employees,
-            "employee": employee_name,
-            "generated_files": generated_files,
-            "failed_files": failed_files,
-            "scored_answers_df": scored_answers_df,
-            "indicator_score_df": indicator_score_df,
-            "dimension_score_df": dimension_score_df,
-            "dimension_gap_df": dimension_gap_df,
-            "total_records": total_records,
-            "matched_records": matched_records,
-            "unmatched_records": unmatched_records,
-            "coverage": coverage,
-            "temp_dir": temp_dir,
-        }
+            pass
 
 
 # ============================================================
-# ZIP
+# VALIDATE OUTPUT
 # ============================================================
 
-def create_zip(generated_files):
-    zip_buffer = io.BytesIO()
+def validate_employee_output(
+    output_file,
+    employee_name
+):
 
-    with zipfile.ZipFile(
-        zip_buffer,
-        mode="w",
-        compression=zipfile.ZIP_DEFLATED,
-    ) as zip_file:
-
-        for file_path in generated_files:
-
-            zip_file.write(
-                file_path,
-                arcname=file_path.name,
-            )
-
-    zip_buffer.seek(0)
-
-    return zip_buffer.getvalue()
-
-
-# ============================================================
-# UI
-# ============================================================
-
-st.title(
-    "📊 Learning Agility Assessment System"
-)
-
-st.write(
-    "Upload hasil **Self Assessment** dan "
-    "**Superior Assessment**. Sistem akan memproses "
-    "jawaban, melakukan scoring berdasarkan master, "
-    "mengisi hanya cell yang memang menjadi area input "
-    "Python pada template Excel, lalu menggabungkan "
-    "seluruh hasil employee ke dalam satu file ZIP."
-)
-
-if not MASTER_FILE.exists():
-
-    st.error(
-        "Template master belum ditemukan."
+    wb = load_workbook(
+        output_file,
+        data_only=False
     )
 
-    st.code(
-        str(MASTER_FILE),
-        language="text",
-    )
-
-    st.info(
-        "Buat folder `templates` di lokasi yang sama "
-        "dengan app.py, lalu simpan template Excel "
-        "sebagai `master.xlsx`."
-    )
-
-    st.stop()
-
-
-try:
-
-    (
-        indicator_master_df,
-        answer_mapping,
-        master_structure,
-        master_formulas,
-        master_fonts,
-    ) = load_master_metadata()
-
-except Exception as exc:
-
-    st.error(
-        "Master template gagal dibaca."
-    )
-
-    st.exception(exc)
-
-    st.stop()
-
-
-with st.sidebar:
-
-    st.header("Configuration")
-
-    st.success(
-        f"Master OK — "
-        f"{len(indicator_master_df)} indicators"
-    )
-
-    st.write(
-        f"• Dimensions: {len(DIMENSIONS)}"
-    )
-
-    st.write(
-        "• Indicators: 50"
-    )
-
-    st.write(
-        "• Ratings: 1–5"
-    )
-
-    st.write(
-        "• Output mode: exact master patch"
-    )
-
-    validation_enabled = st.checkbox(
-        "Enable output validation",
-        value=True,
-        help=(
-            "Validasi structure, formula, employee data, "
-            "font, dan memastikan tidak ada cell di luar "
-            "area Python yang berubah."
-        ),
-    )
-
-
-col1, col2 = st.columns(2)
-
-with col1:
-
-    self_file = st.file_uploader(
-        "1. Upload Self Assessment",
-        type=["xlsx"],
-        key="self_upload",
-    )
-
-with col2:
-
-    superior_file = st.file_uploader(
-        "2. Upload Superior Assessment",
-        type=["xlsx"],
-        key="superior_upload",
-    )
-
-
-process_button = st.button(
-    "🚀 Process Assessment",
-    type="primary",
-    use_container_width=True,
-    disabled=(
-        self_file is None
-        or superior_file is None
-    ),
-)
-
-
-if process_button:
-
-    progress_bar = st.progress(0)
-    status_box = st.empty()
+    errors = []
 
     try:
 
-        # ----------------------------------------------------
-        # LOAD UPLOADED FILES
-        # ----------------------------------------------------
+        if not wb.sheetnames:
 
-        status_box.info(
-            "Membaca Self Assessment..."
-        )
+            errors.append(
+                "Workbook tidak memiliki sheet."
+            )
 
-        df_self = pd.read_excel(
-            io.BytesIO(
-                self_file.getvalue()
-            ),
-            engine="openpyxl",
-        )
+        elif (
+            wb.sheetnames[0]
+            != "Identitas"
+        ):
 
-        status_box.info(
-            "Membaca Superior Assessment..."
-        )
+            errors.append(
+                "Sheet Identitas tidak sesuai."
+            )
 
-        df_superior = pd.read_excel(
-            io.BytesIO(
-                superior_file.getvalue()
-            ),
-            engine="openpyxl",
-        )
+        if "Identitas" not in wb.sheetnames:
 
-        st.session_state["input_shapes"] = {
-            "self": df_self.shape,
-            "superior": df_superior.shape,
+            errors.append(
+                "Sheet Identitas tidak ditemukan."
+            )
+
+        else:
+
+            output_name = (
+                wb[
+                    "Identitas"
+                ][
+                    "D2"
+                ].value
+            )
+
+            if (
+                normalize_text(
+                    output_name
+                )
+                !=
+                normalize_text(
+                    employee_name
+                )
+            ):
+
+                errors.append(
+                    "Identitas!D2 "
+                    "tidak sesuai employee."
+                )
+
+        for sheet_name in ASSESSMENT_SHEETS:
+
+            if (
+                sheet_name
+                not in wb.sheetnames
+            ):
+
+                errors.append(
+                    f"Sheet {sheet_name} "
+                    "tidak ditemukan."
+                )
+
+    finally:
+
+        wb.close()
+
+    if errors:
+
+        return {
+            "status":
+                "FAILED",
+
+            "errors":
+                errors
         }
 
-        # ----------------------------------------------------
-        # PROCESS
-        # ----------------------------------------------------
+    return {
+        "status":
+            "PASSED",
 
-        status_box.info(
-            "Memproses scoring dan membuat file employee..."
+        "errors":
+            []
+    }
+
+
+# ============================================================
+# CREATE ONE EMPLOYEE FILE
+# ============================================================
+
+def create_employee_file(
+    employee_name,
+    master_file,
+    df_self,
+    df_superior,
+    scored_answers,
+    output_dir
+):
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    safe_name = re.sub(
+        r'[\\/*?:"<>|]',
+        "_",
+        str(employee_name)
+    ).strip()
+
+    if not safe_name:
+
+        safe_name = "Employee"
+
+    output_file = (
+        output_dir
+        /
+        (
+            "Learning_Agility_"
+            f"{safe_name}.xlsx"
+        )
+    )
+
+    # ========================================================
+    # STEP 1 — COPY MASTER
+    # ========================================================
+
+    shutil.copy2(
+        master_file,
+        output_file
+    )
+
+    # ========================================================
+    # STEP 2 — PREPARE DATA
+    # ========================================================
+
+    employee_values = (
+        prepare_employee_values(
+
+            employee_name=
+                employee_name,
+
+            scored_answers=
+                scored_answers,
+
+            df_self=
+                df_self,
+
+            df_superior=
+                df_superior
+
+        )
+    )
+
+    # ========================================================
+    # STEP 3 — WRITE USING EXCEL COM
+    # ========================================================
+
+    write_values_with_excel(
+
+        output_file=
+            output_file,
+
+        employee_values=
+            employee_values
+    )
+
+    # ========================================================
+    # STEP 4 — BASIC CHECK
+    # ========================================================
+
+    if not output_file.exists():
+
+        raise FileNotFoundError(
+            "Output tidak berhasil dibuat:\n"
+            f"{output_file}"
         )
 
-        final_state = None
+    if output_file.stat().st_size == 0:
 
-        generator = generate_all_files(
-            df_self=df_self,
-            df_superior=df_superior,
-            master_file=MASTER_FILE,
-            indicator_master_df=indicator_master_df,
-            answer_mapping=answer_mapping,
-            master_structure=master_structure,
-            master_formulas=master_formulas,
-            master_fonts=master_fonts,
-            validation_enabled=validation_enabled,
+        raise IOError(
+            "Output file kosong:\n"
+            f"{output_file}"
         )
 
-        for state in generator:
+    # ========================================================
+    # STEP 5 — VALIDATION
+    # ========================================================
 
-            final_state = state
+    validation = (
+        validate_employee_output(
 
-            progress = (
-                state["index"]
-                / state["total"]
-            )
+            output_file=
+                output_file,
 
-            progress_bar.progress(
-                progress
-            )
+            employee_name=
+                employee_name
 
-            status_box.info(
-                f"Processing "
-                f"{state['index']}/{state['total']}: "
-                f"{state['employee']}"
-            )
+        )
+    )
 
-        if final_state is None:
-            raise RuntimeError(
-                "Tidak ada hasil processing."
-            )
-
-        # ----------------------------------------------------
-        # RESULT SUMMARY
-        # ----------------------------------------------------
-
-        generated_files = final_state[
-            "generated_files"
+    if (
+        validation[
+            "status"
         ]
+        != "PASSED"
+    ):
 
-        failed_files = final_state[
-            "failed_files"
-        ]
-
-        progress_bar.progress(1.0)
-
-        status_box.success(
-            "Processing selesai."
+        raise ValueError(
+            str(
+                validation[
+                    "errors"
+                ]
+            )
         )
 
-        # ----------------------------------------------------
-        # KPI
-        # ----------------------------------------------------
+    return output_file
 
-        k1, k2, k3, k4 = st.columns(4)
 
-        k1.metric(
-            "Employees",
-            final_state["total"],
+# ============================================================
+# CREATE ALL EMPLOYEE FILES
+# ============================================================
+
+def create_all_employee_files(
+    employees,
+    master_file,
+    df_self,
+    df_superior,
+    scored_answers,
+    output_dir
+):
+
+    output_dir.mkdir(
+        parents=True,
+        exist_ok=True
+    )
+
+    generated_files = []
+
+    # ========================================================
+    # GENERATE EACH EMPLOYEE
+    # ========================================================
+
+    for employee_name in employees:
+
+        output_file = (
+            create_employee_file(
+
+                employee_name=
+                    employee_name,
+
+                master_file=
+                    master_file,
+
+                df_self=
+                    df_self,
+
+                df_superior=
+                    df_superior,
+
+                scored_answers=
+                    scored_answers,
+
+                output_dir=
+                    output_dir
+            )
         )
 
-        k2.metric(
-            "Generated",
-            len(generated_files),
+        generated_files.append(
+            output_file
         )
 
-        k3.metric(
-            "Failed",
-            len(failed_files),
-        )
+    # ========================================================
+    # CREATE ZIP
+    # ========================================================
 
-        k4.metric(
-            "Mapping Coverage",
-            f"{final_state['coverage']:.2%}",
-        )
+    zip_file = (
+        output_dir
+        /
+        "Learning_Agility_All_Employees.zip"
+    )
 
-        # ----------------------------------------------------
-        # MAPPING STATUS
-        # ----------------------------------------------------
+    if zip_file.exists():
 
-        st.subheader(
-            "Processing Summary"
-        )
+        zip_file.unlink()
 
-        st.write(
-            f"Total records: "
-            f"**{final_state['total_records']:,}**"
-        )
+    with zipfile.ZipFile(
+        zip_file,
+        mode="w",
+        compression=zipfile.ZIP_DEFLATED
+    ) as zipf:
 
-        st.write(
-            f"Matched records: "
-            f"**{final_state['matched_records']:,}**"
-        )
+        for output_file in generated_files:
 
-        st.write(
-            f"Unmatched records: "
-            f"**{final_state['unmatched_records']:,}**"
-        )
+            if not output_file.exists():
 
-        # ----------------------------------------------------
-        # FAILED EMPLOYEES
-        # ----------------------------------------------------
+                raise FileNotFoundError(
+                    "File employee tidak ditemukan "
+                    "sebelum dimasukkan ke ZIP:\n"
+                    f"{output_file}"
+                )
 
-        if failed_files:
+            zipf.write(
 
-            st.warning(
-                f"{len(failed_files)} employee gagal dibuat."
+                output_file,
+
+                arcname=
+                    output_file.name
+
             )
 
-            st.dataframe(
-                pd.DataFrame(failed_files),
-                use_container_width=True,
-            )
+    # ========================================================
+    # VALIDATE ZIP
+    # ========================================================
 
-        # ----------------------------------------------------
-        # ZIP DOWNLOAD
-        # ----------------------------------------------------
+    if not zip_file.exists():
 
-        if generated_files:
-
-            status_box.info(
-                "Membuat ZIP hasil..."
-            )
-
-            zip_bytes = create_zip(
-                generated_files
-            )
-
-            st.download_button(
-                label=(
-                    "📦 Download All Results (.ZIP)"
-                ),
-                data=zip_bytes,
-                file_name=(
-                    "Learning_Agility_Results.zip"
-                ),
-                mime="application/zip",
-                type="primary",
-                use_container_width=True,
-            )
-
-            st.success(
-                f"{len(generated_files)} file Excel "
-                "berhasil dibuat dan siap di-download."
-            )
-
-        # ----------------------------------------------------
-        # DIMENSION SCORE PREVIEW
-        # ----------------------------------------------------
-
-        st.subheader(
-            "Dimension Score Preview"
+        raise FileNotFoundError(
+            "ZIP tidak berhasil dibuat."
         )
 
-        preview_df = final_state[
-            "dimension_score_df"
-        ].copy()
+    if zip_file.stat().st_size == 0:
 
-        if not preview_df.empty:
-
-            preview_df["dimension_score"] = (
-                preview_df["dimension_score"]
-                .round(2)
-            )
-
-            st.dataframe(
-                preview_df,
-                use_container_width=True,
-            )
-
-        # ----------------------------------------------------
-        # GAP PREVIEW
-        # ----------------------------------------------------
-
-        st.subheader(
-            "Self vs Superior Gap Preview"
+        raise IOError(
+            "ZIP berhasil dibuat tetapi kosong."
         )
 
-        gap_df = final_state[
-            "dimension_gap_df"
-        ].copy()
+    return (
+        zip_file,
+        generated_files
+    )
 
-        if not gap_df.empty:
 
-            for col in [
+# ============================================================
+# PROCESS ALL DATA
+# ============================================================
+
+def process_files(
+    master_file,
+    self_file,
+    superior_file
+):
+
+    # ========================================================
+    # CHECK MASTER
+    # ========================================================
+
+    if not master_file.exists():
+
+        raise FileNotFoundError(
+            "Master Template tidak ditemukan.\n\n"
+            f"Path:\n{master_file}"
+        )
+
+    # ========================================================
+    # RESET BUFFER POSITION
+    # ========================================================
+
+    if hasattr(
+        self_file,
+        "seek"
+    ):
+
+        self_file.seek(0)
+
+    if hasattr(
+        superior_file,
+        "seek"
+    ):
+
+        superior_file.seek(0)
+
+    # ========================================================
+    # LOAD SELF
+    # ========================================================
+
+    df_self = pd.read_excel(
+        self_file,
+        engine="openpyxl"
+    )
+
+    # ========================================================
+    # LOAD SUPERIOR
+    # ========================================================
+
+    df_superior = pd.read_excel(
+        superior_file,
+        engine="openpyxl"
+    )
+
+    # ========================================================
+    # READ MASTER
+    # ========================================================
+
+    indicator_master_df = (
+        read_master_indicators(
+            master_file
+        )
+    )
+
+    # ========================================================
+    # MASTER QUESTIONS
+    # ========================================================
+
+    master_questions = (
+        indicator_master_df[
+            "question"
+        ].tolist()
+    )
+
+    # ========================================================
+    # DETECT SELF QUESTIONS
+    # ========================================================
+
+    self_question_cols = (
+        detect_question_columns(
+            df_self,
+            master_questions
+        )
+    )
+
+    # ========================================================
+    # DETECT SUPERIOR QUESTIONS
+    # ========================================================
+
+    superior_question_cols = (
+        detect_question_columns(
+            df_superior,
+            master_questions
+        )
+    )
+
+    if (
+        len(
+            self_question_cols
+        )
+        != 50
+    ):
+
+        raise ValueError(
+            "Self raw contains "
+            f"{len(self_question_cols)} questions. "
+            "Expected 50."
+        )
+
+    if (
+        len(
+            superior_question_cols
+        )
+        != 50
+    ):
+
+        raise ValueError(
+            "Superior raw contains "
+            f"{len(superior_question_cols)} questions. "
+            "Expected 50."
+        )
+
+    # ========================================================
+    # ANSWER MAPPING
+    # ========================================================
+
+    answer_mapping = (
+        build_answer_mapping(
+            indicator_master_df
+        )
+    )
+
+    # ========================================================
+    # PROCESS SELF
+    # ========================================================
+
+    self_scored_df = (
+        process_assessment(
+
+            df=
+                df_self,
+
+            question_columns=
+                self_question_cols,
+
+            rater_type=
                 "Self",
+
+            indicator_master_df=
+                indicator_master_df,
+
+            answer_mapping=
+                answer_mapping
+        )
+    )
+
+    # ========================================================
+    # PROCESS SUPERIOR
+    # ========================================================
+
+    superior_scored_df = (
+        process_assessment(
+
+            df=
+                df_superior,
+
+            question_columns=
+                superior_question_cols,
+
+            rater_type=
                 "Superior",
-                "gap",
-            ]:
 
-                if col in gap_df.columns:
+            indicator_master_df=
+                indicator_master_df,
 
-                    gap_df[col] = (
-                        pd.to_numeric(
-                            gap_df[col],
-                            errors="coerce",
-                        )
-                        .round(2)
+            answer_mapping=
+                answer_mapping
+        )
+    )
+
+    # ========================================================
+    # COMBINE
+    # ========================================================
+
+    scored_answers_df = pd.concat(
+
+        [
+            self_scored_df,
+            superior_scored_df
+        ],
+
+        ignore_index=True
+    )
+
+    # ========================================================
+    # EMPLOYEE VALIDATION
+    # ========================================================
+
+    empty_employee = (
+
+        scored_answers_df[
+            "employee_name"
+        ]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .eq("")
+        .sum()
+
+    )
+
+    if empty_employee > 0:
+
+        raise ValueError(
+            f"Ada {empty_employee} record "
+            "dengan employee_name kosong."
+        )
+
+    # ========================================================
+    # EMPLOYEE LIST
+    # ========================================================
+
+    employees = sorted(
+
+        scored_answers_df[
+
+            scored_answers_df[
+                "rater_type"
+            ]
+            == "Self"
+
+        ][
+            "employee_name"
+        ]
+
+        .dropna()
+
+        .astype(str)
+
+        .str.strip()
+
+        .loc[
+            lambda s:
+                s != ""
+        ]
+
+        .unique()
+
+    )
+
+    if len(
+        employees
+    ) == 0:
+
+        raise ValueError(
+            "Tidak ada employee dari "
+            "Self Assessment."
+        )
+
+    return {
+
+        "df_self":
+            df_self,
+
+        "df_superior":
+            df_superior,
+
+        "indicator_master_df":
+            indicator_master_df,
+
+        "self_scored_df":
+            self_scored_df,
+
+        "superior_scored_df":
+            superior_scored_df,
+
+        "scored_answers_df":
+            scored_answers_df,
+
+        "employees":
+            employees,
+
+    }
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "processed_data" not in st.session_state:
+
+    st.session_state.processed_data = None
+
+
+if "generated_file" not in st.session_state:
+
+    st.session_state.generated_file = None
+
+
+if "generated_employee" not in st.session_state:
+
+    st.session_state.generated_employee = None
+
+
+if "generated_zip" not in st.session_state:
+
+    st.session_state.generated_zip = None
+
+
+if "self_file_version" not in st.session_state:
+
+    st.session_state.self_file_version = 0
+
+
+if "superior_file_version" not in st.session_state:
+
+    st.session_state.superior_file_version = 0
+
+
+if "self_file_bytes" not in st.session_state:
+
+    st.session_state.self_file_bytes = None
+
+
+if "self_file_name" not in st.session_state:
+
+    st.session_state.self_file_name = None
+
+
+if "superior_file_bytes" not in st.session_state:
+
+    st.session_state.superior_file_bytes = None
+
+
+if "superior_file_name" not in st.session_state:
+
+    st.session_state.superior_file_name = None
+
+
+if "mapping_counts" not in st.session_state:
+
+    st.session_state.mapping_counts = {}
+
+
+# ============================================================
+# BACKGROUND
+# ============================================================
+
+if BACKGROUND_BASE64:
+
+    st.markdown(
+        f"""
+        <style>
+
+        .stApp {{
+
+            min-height:
+                100vh;
+
+            background-image:
+
+                linear-gradient(
+                    rgba(255,248,242,0.68),
+                    rgba(255,244,235,0.76)
+                ),
+
+                url(
+                    "data:image/png;base64,{BACKGROUND_BASE64}"
+                );
+
+            background-size:
+                cover;
+
+            background-position:
+                center center;
+
+            background-repeat:
+                no-repeat;
+
+            background-attachment:
+                fixed;
+        }}
+
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+else:
+
+    st.markdown(
+        """
+        <style>
+
+        .stApp {
+
+            min-height:
+                100vh;
+
+            background:
+                linear-gradient(
+                    135deg,
+                    #fffaf7 0%,
+                    #fff4eb 48%,
+                    #fffaf7 100%
+                );
+        }
+
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+# ============================================================
+# CUSTOM CSS
+# ============================================================
+
+st.markdown(
+    textwrap.dedent(
+        """
+        <style>
+
+        /* ====================================================
+            STREAMLIT STATUS / SPINNER TEXT
+            ==================================================== */
+
+            div[data-testid="stSpinner"] {
+                color: #000000 !important;
+            }
+
+            div[data-testid="stSpinner"] p {
+                color: #000000 !important;
+            }
+
+
+            /* ====================================================
+            SELECTBOX LABEL
+            ==================================================== */
+
+            div[data-testid="stSelectbox"] label {
+                color: #000000 !important;
+            }
+
+
+            /* ====================================================
+            SELECTBOX SELECTED VALUE
+            ==================================================== */
+
+            div[data-baseweb="select"] {
+                color: #000000 !important;
+            }
+
+            div[data-baseweb="select"] * {
+                color: #000000 !important;
+            }
+
+        /* ====================================================
+           MAIN AREA
+           ==================================================== */
+
+        .block-container {
+
+            max-width:
+                820px !important;
+
+            padding-top:
+                30px !important;
+
+            padding-bottom:
+                55px !important;
+
+            position:
+                relative;
+
+            z-index:
+                2;
+        }
+
+
+        /* ====================================================
+           HEADER
+           ==================================================== */
+
+        header[data-testid="stHeader"] {
+
+            background:
+                transparent;
+        }
+
+
+        #MainMenu {
+
+            visibility:
+                hidden;
+        }
+
+
+        footer {
+
+            visibility:
+                hidden;
+        }
+
+
+        /* ====================================================
+           REMOVE OLD WAVES
+           ==================================================== */
+
+        .stApp::before,
+        .stApp::after {
+
+            display:
+                none;
+        }
+
+
+        /* ====================================================
+           MAIN LEARNING AGILITY CARD
+           ==================================================== */
+
+        .st-key-main_card {
+
+            width:
+                min(700px,100%);
+
+            margin:
+                0 auto;
+
+            padding:
+                26px 42px 25px 42px;
+
+            background:
+                rgba(255,255,255,0.90);
+
+            border:
+                1px solid
+                rgba(255,155,83,0.37);
+
+            border-radius:
+                26px;
+
+            box-shadow:
+
+                0 25px 60px
+                rgba(211,125,68,0.15),
+
+                0 7px 22px
+                rgba(211,125,68,0.08);
+
+            backdrop-filter:
+                blur(18px);
+
+            -webkit-backdrop-filter:
+                blur(18px);
+        }
+
+
+        /* ====================================================
+           BRAND
+           ==================================================== */
+
+        .learning-brand {
+
+            text-align:
+                center;
+
+            margin-bottom:
+                18px;
+        }
+
+
+        .learning-logo {
+
+            width:
+                54px;
+
+            height:
+                54px;
+
+            margin:
+                0 auto 5px auto;
+
+            position:
+                relative;
+        }
+
+
+        .logo-piece-one {
+
+            position:
+                absolute;
+
+            left:
+                8px;
+
+            top:
+                3px;
+
+            width:
+                24px;
+
+            height:
+                46px;
+
+            background:
+                #ff7417;
+
+            clip-path:
+                polygon(
+                    38% 0%,
+                    100% 0%,
+                    62% 34%,
+                    62% 100%,
+                    0% 78%,
+                    0% 32%
+                );
+        }
+
+
+        .logo-piece-two {
+
+            position:
+                absolute;
+
+            left:
+                24px;
+
+            top:
+                7px;
+
+            width:
+                25px;
+
+            height:
+                38px;
+
+            background:
+                #f87618;
+
+            clip-path:
+                polygon(
+                    26% 0%,
+                    100% 0%,
+                    100% 56%,
+                    52% 82%,
+                    0% 100%,
+                    27% 60%
+                );
+        }
+
+
+        .logo-piece-three {
+
+            position:
+                absolute;
+
+            left:
+                8px;
+
+            bottom:
+                3px;
+
+            width:
+                24px;
+
+            height:
+                18px;
+
+            background:
+                #ff9635;
+
+            clip-path:
+                polygon(
+                    0% 0%,
+                    100% 45%,
+                    50% 100%
+                );
+        }
+
+
+        .learning-brand-title {
+
+            margin:
+                0;
+
+            color:
+                #192536;
+
+            font-size:
+                34px;
+
+            line-height:
+                1.08;
+
+            font-weight:
+                750;
+
+            letter-spacing:
+                -1.3px;
+        }
+
+
+        .learning-brand-title .orange {
+
+            color:
+                #f87618;
+        }
+
+
+        .learning-brand-subtitle {
+
+            margin-top:
+                6px;
+
+            color:
+                #7c8797;
+
+            font-size:
+                15px;
+
+            line-height:
+                1.3;
+        }
+
+
+        /* ====================================================
+           SECTION LABEL
+           ==================================================== */
+
+        .learning-section-label {
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            gap:
+                10px;
+
+            margin-top:
+                15px;
+
+            margin-bottom:
+                8px;
+
+            color:
+                #172333;
+
+            font-size:
+                17px;
+
+            font-weight:
+                650;
+        }
+
+
+        /* ====================================================
+           ICON
+           ==================================================== */
+
+        .user-icon,
+        .people-icon {
+
+            width:
+                29px;
+
+            height:
+                29px;
+
+            min-width:
+                29px;
+
+            border-radius:
+                8px;
+
+            background:
+                rgba(255,116,24,0.09);
+
+            position:
+                relative;
+        }
+
+
+        /* ====================================================
+           USER ICON
+           ==================================================== */
+
+        .user-icon::before {
+
+            content:
+                "";
+
+            position:
+                absolute;
+
+            width:
+                7px;
+
+            height:
+                7px;
+
+            left:
+                9px;
+
+            top:
+                5px;
+
+            border:
+                2px solid
+                #f87618;
+
+            border-radius:
+                50%;
+        }
+
+
+        .user-icon::after {
+
+            content:
+                "";
+
+            position:
+                absolute;
+
+            width:
+                14px;
+
+            height:
+                8px;
+
+            left:
+                6px;
+
+            bottom:
+                5px;
+
+            border:
+                2px solid
+                #f87618;
+
+            border-bottom:
+                0;
+
+            border-radius:
+                8px 8px 0 0;
+        }
+
+
+        /* ====================================================
+           PEOPLE ICON
+           ==================================================== */
+
+        .people-icon::before {
+
+            content:
+                "";
+
+            position:
+                absolute;
+
+            width:
+                6px;
+
+            height:
+                6px;
+
+            left:
+                5px;
+
+            top:
+                5px;
+
+            border:
+                2px solid
+                #f87618;
+
+            border-radius:
+                50%;
+
+            box-shadow:
+                10px 2px 0 -1px #ffffff,
+                10px 2px 0 1px #f87618;
+        }
+
+
+        .people-icon::after {
+
+            content:
+                "";
+
+            position:
+                absolute;
+
+            width:
+                10px;
+
+            height:
+                7px;
+
+            left:
+                4px;
+
+            bottom:
+                5px;
+
+            border:
+                2px solid
+                #f87618;
+
+            border-bottom:
+                0;
+
+            border-radius:
+                8px 8px 0 0;
+
+            box-shadow:
+                10px 0 0 -1px #ffffff,
+                10px 0 0 1px #f87618;
+        }
+
+
+        /* ====================================================
+           UPLOAD ZONE WRAPPER
+           Only exists before file selection.
+           ==================================================== */
+
+        .st-key-self_upload_zone,
+        .st-key-superior_upload_zone {
+
+            position:
+                relative;
+
+            width:
+                100%;
+
+            margin:
+                0;
+
+            padding:
+                0;
+        }
+
+
+        /* ====================================================
+           CUSTOM EMPTY UPLOAD CARD
+           ==================================================== */
+
+        .custom-empty-upload-card {
+
+            width:
+                100%;
+
+            height:
+                96px;
+
+            min-height:
+                96px;
+
+            box-sizing:
+                border-box;
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            position:
+                relative;
+
+            padding:
+                20px 26px;
+
+            background:
+                rgba(255,255,255,0.86);
+
+            border:
+                1px solid
+                rgba(255,137,76,0.36);
+
+            border-radius:
+                17px;
+
+            box-shadow:
+                0 5px 18px
+                rgba(213,125,67,0.035);
+
+            transition:
+                transform 0.18s ease,
+                box-shadow 0.18s ease,
+                border-color 0.18s ease;
+
+            pointer-events:
+                none;
+        }
+
+        /* ====================================================
+            UPLOAD CARD HOVER
+            Same effect as Generate Report
+            ==================================================== */
+
+            .st-key-self_upload_zone:hover
+            .custom-empty-upload-card,
+
+            .st-key-superior_upload_zone:hover
+            .custom-empty-upload-card {
+
+                transform:
+                    translateY(-1px);
+
+                box-shadow:
+                    0 14px 28px
+                    rgba(255,116,18,0.18);
+
+                border-color:
+                    rgba(255,126,49,0.50);
+            }
+
+
+        /* ====================================================
+           UPLOAD ICON BOX
+           ==================================================== */
+
+        .upload-icon-box {
+
+            width:
+                62px;
+
+            height:
+                62px;
+
+            min-width:
+                62px;
+
+            margin-right:
+                20px;
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            justify-content:
+                center;
+
+            position:
+                relative;
+
+            border-radius:
+                13px;
+
+            background:
+                #fff0e6;
+        }
+
+
+        /* ====================================================
+           UPLOAD ARROW
+           ==================================================== */
+
+        .upload-arrow {
+
+            width:
+                26px;
+
+            height:
+                31px;
+
+            position:
+                relative;
+        }
+
+
+        .upload-arrow::before {
+
+            content:
+                "";
+
+            position:
+                absolute;
+
+            width:
+                2px;
+
+            height:
+                23px;
+
+            left:
+                12px;
+
+            top:
+                6px;
+
+            background:
+                #ff7417;
+
+            border-radius:
+                2px;
+        }
+
+
+        .upload-arrow::after {
+
+            content:
+                "";
+
+            position:
+                absolute;
+
+            width:
+                11px;
+
+            height:
+                11px;
+
+            left:
+                7px;
+
+            top:
+                4px;
+
+            border-top:
+                2px solid
+                #ff7417;
+
+            border-left:
+                2px solid
+                #ff7417;
+
+            transform:
+                rotate(45deg);
+        }
+
+
+        /* ====================================================
+           EMPTY UPLOAD TEXT
+           ==================================================== */
+
+        .upload-text-area {
+
+            flex:
+                1;
+
+            min-width:
+                0;
+        }
+
+
+        .upload-primary-text {
+
+            color:
+                #ff7417;
+
+            font-size:
+                20px;
+
+            line-height:
+                1.2;
+
+            font-weight:
+                700;
+        }
+
+
+        .upload-secondary-text {
+
+            margin-top:
+                7px;
+
+            color:
+                #8290a2;
+
+            font-size:
+                15px;
+
+            line-height:
+                1.3;
+        }
+
+
+        /* ====================================================
+           FILE OUTLINE ICON
+           ==================================================== */
+
+        .upload-file-icon {
+
+            width:
+                31px;
+
+            height:
+                25px;
+
+            min-width:
+                31px;
+
+            position:
+                relative;
+
+            margin-left:
+                16px;
+
+            border:
+                2px solid
+                #ff7417;
+
+            transform:
+                skewX(-10deg);
+        }
+
+
+        .upload-file-icon::before {
+
+            content:
+                "";
+
+            position:
+                absolute;
+
+            width:
+                11px;
+
+            height:
+                11px;
+
+            right:
+                -2px;
+
+            top:
+                -2px;
+
+            background:
+                rgba(255,255,255,0.90);
+
+            border-left:
+                2px solid
+                #ff7417;
+
+            border-bottom:
+                2px solid
+                #ff7417;
+        }
+
+
+        /* ====================================================
+           NATIVE STREAMLIT UPLOADER
+           Hidden visually but remains clickable.
+           ==================================================== */
+
+        .st-key-self_native_uploader,
+        .st-key-superior_native_uploader {
+
+            position:
+                absolute !important;
+
+            left:
+                0 !important;
+
+            top:
+                0 !important;
+
+            width:
+                100% !important;
+
+            height:
+                126px !important;
+
+            min-height:
+                126px !important;
+
+            z-index:
+                50 !important;
+
+            opacity:
+                0 !important;
+
+            margin:
+                0 !important;
+
+            padding:
+                0 !important;
+        }
+
+
+        .st-key-self_native_uploader
+        div[data-testid="stFileUploader"],
+
+        .st-key-superior_native_uploader
+        div[data-testid="stFileUploader"] {
+
+            width:
+                100% !important;
+
+            height:
+                126px !important;
+
+            min-height:
+                126px !important;
+
+            margin:
+                0 !important;
+
+            padding:
+                0 !important;
+        }
+
+
+        .st-key-self_native_uploader
+        div[data-testid="stFileUploader"] section,
+
+        .st-key-superior_native_uploader
+        div[data-testid="stFileUploader"] section {
+
+            width:
+                100% !important;
+
+            height:
+                126px !important;
+
+            min-height:
+                126px !important;
+
+            box-sizing:
+                border-box !important;
+
+            padding:
+                0 !important;
+
+            margin:
+                0 !important;
+
+            border:
+                none !important;
+
+            background:
+                transparent !important;
+
+            cursor:
+                pointer !important;
+        }
+
+
+        .st-key-self_native_uploader
+        div[data-testid="stFileUploader"] *,
+
+        .st-key-superior_native_uploader
+        div[data-testid="stFileUploader"] * {
+
+            cursor:
+                pointer !important;
+        }
+
+
+        /* ====================================================
+           UPLOADED FILE CARD
+           ==================================================== */
+
+        .custom-uploaded-file {
+
+            width:
+                100%;
+
+            height:
+                108px;
+
+            min-height:
+                108px;
+
+            box-sizing:
+                border-box;
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            padding:
+                14px 18px;
+
+            background:
+                rgba(255,255,255,0.88);
+
+            border:
+                1px solid
+                rgba(255,151,82,0.35);
+
+            border-radius:
+                15px;
+
+            box-shadow:
+                0 7px 20px
+                rgba(213,125,67,0.07);
+        }
+
+
+        .custom-file-badge {
+
+            width:
+                58px;
+
+            height:
+                58px;
+
+            min-width:
+                58px;
+
+            margin-right:
+                16px;
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            justify-content:
+                center;
+
+            border-radius:
+                11px;
+
+            background:
+                #ffe8d8;
+
+            color:
+                #f87618;
+
+            font-size:
+                16px;
+
+            font-weight:
+                750;
+        }
+
+
+        .custom-file-info {
+
+            flex:
+                1;
+
+            min-width:
+                0;
+        }
+
+
+        .custom-file-name {
+
+            color:
+                #172333;
+
+            font-size:
+                15px;
+
+            font-weight:
+                650;
+
+            line-height:
+                1.3;
+
+            white-space:
+                nowrap;
+
+            overflow:
+                hidden;
+
+            text-overflow:
+                ellipsis;
+        }
+
+
+        .custom-file-description {
+
+            margin-top:
+                5px;
+
+            color:
+                #8a95a4;
+
+            font-size:
+                13px;
+        }
+
+
+        .custom-file-check {
+
+            width:
+                40px;
+
+            height:
+                40px;
+
+            min-width:
+                40px;
+
+            margin-left:
+                16px;
+
+            display:
+                flex;
+
+            align-items:
+                center;
+
+            justify-content:
+                center;
+
+            border-radius:
+                50%;
+
+            background:
+                #16a765;
+
+            color:
+                #ffffff;
+
+            font-size:
+                22px;
+
+            font-weight:
+                700;
+        }
+
+
+        /* ====================================================
+           CHANGE FILE
+           ==================================================== */
+
+        .st-key-change_self_file,
+        .st-key-change_superior_file {
+
+            display:
+                flex;
+
+            justify-content:
+                flex-end;
+
+            margin-top:
+                1px;
+
+            margin-bottom:
+                0;
+        }
+
+
+        .st-key-change_self_file button,
+        .st-key-change_superior_file button {
+
+            min-height:
+                26px;
+
+            padding:
+                1px 8px;
+
+            border:
+                none;
+
+            background:
+                transparent;
+
+            color:
+                #f87618;
+
+            font-size:
+                12px;
+
+            font-weight:
+                600;
+        }
+
+
+        .st-key-change_self_file button:hover,
+        .st-key-change_superior_file button:hover {
+
+            color:
+                #d95f0f;
+
+            background:
+                rgba(255,116,24,0.05);
+        }
+
+
+        /* ====================================================
+           GENERATE BUTTON
+           ==================================================== */
+
+        .st-key-generate_report {
+
+            margin-top:
+                15px;
+        }
+
+
+        .st-key-generate_report
+        div.stButton > button {
+
+            width:
+                100%;
+
+            min-height:
+                54px;
+
+            border:
+                none;
+
+            border-radius:
+                13px;
+
+            background:
+                linear-gradient(
+                    90deg,
+                    #ff7112 0%,
+                    #ff8d22 55%,
+                    #ff9d39 100%
+                );
+
+            color:
+                #ffffff;
+
+            font-size:
+                16px;
+
+            font-weight:
+                750;
+
+            box-shadow:
+                0 10px 25px
+                rgba(255,116,18,0.23);
+        }
+
+
+        .st-key-generate_report
+        div.stButton > button:hover {
+
+            color:
+                #ffffff;
+
+            transform:
+                translateY(-1px);
+
+            box-shadow:
+                0 14px 28px
+                rgba(255,116,18,0.29);
+        }
+
+
+        /* ====================================================
+           SECURITY NOTE
+           ==================================================== */
+
+        .learning-security-note {
+
+            text-align:
+                center;
+
+            margin-top:
+                12px;
+
+            color:
+                #929aa7;
+
+            font-size:
+                12px;
+        }
+
+
+        /* ====================================================
+           RESULT CARD
+           ==================================================== */
+
+        .learning-result-card {
+
+            width:
+                min(700px,100%);
+
+            margin:
+                16px auto 0 auto;
+
+            padding:
+                20px 23px;
+
+            background:
+                rgba(255,255,255,0.84);
+
+            border:
+                1px solid
+                rgba(255,151,75,0.22);
+
+            border-radius:
+                18px;
+
+            box-shadow:
+                0 10px 30px
+                rgba(213,125,67,0.08);
+
+            backdrop-filter:
+                blur(12px);
+
+            -webkit-backdrop-filter:
+                blur(12px);
+        }
+
+
+        .learning-result-title {
+
+            margin:
+                0;
+
+            color:
+                #182536;
+
+            font-size:
+                20px;
+
+            font-weight:
+                700;
+        }
+
+
+        .learning-result-description {
+
+            margin-top:
+                6px;
+
+            color:
+                #7b8695;
+
+            font-size:
+                14px;
+
+            line-height:
+                1.45;
+        }
+
+
+        /* ====================================================
+           SELECTBOX
+           ==================================================== */
+
+        div[data-baseweb="select"] > div {
+
+            min-height:
+                46px;
+
+            border-radius:
+                11px;
+
+            border-color:
+                rgba(255,126,49,0.24);
+
+            background:
+                rgba(255,255,255,0.84);
+        }
+
+
+        /* ====================================================
+           GENERATE EMPLOYEE BUTTONS
+           ==================================================== */
+
+        div[data-testid="stHorizontalBlock"] {
+
+            gap:
+                14px;
+        }
+
+
+        /* ====================================================
+           DOWNLOAD BUTTON
+           ==================================================== */
+
+        div[data-testid="stDownloadButton"] button {
+
+            width:
+                100%;
+
+            min-height:
+                50px;
+
+            border-radius:
+                12px;
+
+            border:
+                1px solid
+                rgba(255,126,49,0.28);
+
+            background:
+                #ffffff;
+
+            color:
+                #f87618;
+
+            font-weight:
+                650;
+        }
+
+
+        div[data-testid="stDownloadButton"] button:hover {
+
+            border-color:
+                rgba(255,126,49,0.48);
+
+            color:
+                #d95f0f;
+
+            background:
+                #fffaf7;
+        }
+
+
+        /* ====================================================
+           ALERT
+           ==================================================== */
+
+        div[data-testid="stAlert"] {
+
+            border-radius:
+                13px;
+        }
+
+
+        /* ====================================================
+           MOBILE
+           ==================================================== */
+
+        @media (max-width: 768px) {
+
+            .block-container {
+
+                max-width:
+                    100% !important;
+
+                padding:
+                    18px
+                    14px
+                    35px
+                    14px !important;
+            }
+
+
+            .st-key-main_card {
+
+                width:
+                    100%;
+
+                padding:
+                    22px
+                    19px
+                    22px
+                    19px;
+
+                border-radius:
+                    22px;
+            }
+
+
+            .learning-brand {
+
+                margin-bottom:
+                    15px;
+            }
+
+
+            .learning-brand-title {
+
+                font-size:
+                    29px;
+
+                letter-spacing:
+                    -1px;
+            }
+
+
+            .learning-brand-subtitle {
+
+                font-size:
+                    14px;
+            }
+
+
+            .learning-section-label {
+
+                font-size:
+                    16px;
+
+                margin-top:
+                    13px;
+            }
+
+
+            .custom-empty-upload-card {
+
+                height:
+                    116px;
+
+                min-height:
+                    116px;
+
+                padding:
+                    17px 18px;
+            }
+
+
+            .st-key-self_native_uploader,
+            .st-key-superior_native_uploader {
+
+                height:
+                    116px !important;
+
+                min-height:
+                    116px !important;
+            }
+
+
+            .st-key-self_native_uploader
+            div[data-testid="stFileUploader"],
+
+            .st-key-superior_native_uploader
+            div[data-testid="stFileUploader"] {
+
+                height:
+                    116px !important;
+
+                min-height:
+                    116px !important;
+            }
+
+
+            .st-key-self_native_uploader
+            div[data-testid="stFileUploader"] section,
+
+            .st-key-superior_native_uploader
+            div[data-testid="stFileUploader"] section {
+
+                height:
+                    116px !important;
+
+                min-height:
+                    116px !important;
+            }
+
+
+            .upload-icon-box {
+
+                width:
+                    52px;
+
+                height:
+                    52px;
+
+                min-width:
+                    52px;
+
+                margin-right:
+                    13px;
+            }
+
+
+            .upload-primary-text {
+
+                font-size:
+                    17px;
+            }
+
+
+            .upload-secondary-text {
+
+                font-size:
+                    13px;
+            }
+
+
+            .upload-file-icon {
+
+                width:
+                    27px;
+
+                height:
+                    22px;
+
+                min-width:
+                    27px;
+
+                margin-left:
+                    10px;
+            }
+
+
+            .custom-uploaded-file {
+
+                height:
+                    96px;
+
+                min-height:
+                    96px;
+
+                padding:
+                    12px;
+            }
+
+
+            .custom-file-badge {
+
+                width:
+                    48px;
+
+                height:
+                    48px;
+
+                min-width:
+                    48px;
+
+                margin-right:
+                    11px;
+
+                font-size:
+                    14px;
+            }
+
+
+            .custom-file-check {
+
+                width:
+                    34px;
+
+                height:
+                    34px;
+
+                min-width:
+                    34px;
+
+                margin-left:
+                    10px;
+
+                font-size:
+                    18px;
+            }
+
+
+            .custom-file-name {
+
+                font-size:
+                    14px;
+            }
+
+
+            .custom-file-description {
+
+                font-size:
+                    12px;
+            }
+
+
+            .learning-result-card {
+
+                width:
+                    100%;
+            }
+
+        }
+
+        </style>
+        """
+    ),
+    unsafe_allow_html=True
+)
+
+
+# ============================================================
+# MAIN CARD
+# ============================================================
+
+with st.container(
+    key="main_card"
+):
+
+    # ========================================================
+    # BRAND
+    # ========================================================
+
+    render_html(
+        """
+        <div class="learning-brand">
+
+            <div class="learning-logo">
+
+                <span class="logo-piece-one"></span>
+                <span class="logo-piece-two"></span>
+                <span class="logo-piece-three"></span>
+
+            </div>
+
+            <div class="learning-brand-title">
+                Learning
+                <span class="orange">
+                    Agility
+                </span>
+            </div>
+
+            <div class="learning-brand-subtitle">
+                Learning Agility Assessment System
+            </div>
+
+        </div>
+        """
+    )
+
+
+    # ========================================================
+    # SELF ASSESSMENT LABEL
+    # ========================================================
+
+    render_html(
+        """
+        <div class="learning-section-label">
+
+            <div class="user-icon"></div>
+
+            <span>
+                Self Assessment
+            </span>
+
+        </div>
+        """
+    )
+
+
+    # ========================================================
+    # SELF FILE
+    # ========================================================
+
+    self_file = get_stored_file(
+        "self"
+    )
+
+
+    if self_file is None:
+
+        self_widget_key = (
+            "self_file_"
+            f"{st.session_state.self_file_version}"
+        )
+
+        with st.container(
+            key="self_upload_zone"
+        ):
+
+            # ------------------------------------------------
+            # CUSTOM EMPTY CARD
+            # ------------------------------------------------
+
+            render_html(
+                """
+                <div class="custom-empty-upload-card">
+
+                    <div class="upload-icon-box">
+
+                        <div class="upload-arrow"></div>
+
+                    </div>
+
+                    <div class="upload-text-area">
+
+                        <div class="upload-primary-text">
+                            Choose File
+                        </div>
+
+                        <div class="upload-secondary-text">
+                            Excel file (.xlsx)
+                        </div>
+
+                    </div>
+
+                    <div class="upload-file-icon"></div>
+
+                </div>
+                """
+            )
+
+
+            # ------------------------------------------------
+            # INVISIBLE NATIVE UPLOADER
+            # ------------------------------------------------
+
+            with st.container(
+                key="self_native_uploader"
+            ):
+
+                uploaded_self = st.file_uploader(
+
+                    "Self Assessment",
+
+                    type=[
+                        "xlsx"
+                    ],
+
+                    key=
+                        self_widget_key,
+
+                    label_visibility=
+                        "collapsed"
+
+                )
+
+
+        # ----------------------------------------------------
+        # STORE FILE
+        # ----------------------------------------------------
+
+        if uploaded_self is not None:
+
+            store_uploaded_file(
+                "self",
+                uploaded_self
+            )
+
+            st.rerun()
+
+
+    else:
+
+        # ----------------------------------------------------
+        # UPLOADED FILE CARD
+        # ----------------------------------------------------
+
+        render_html(
+            f"""
+            <div class="custom-uploaded-file">
+
+                <div class="custom-file-badge">
+                    XLS
+                </div>
+
+                <div class="custom-file-info">
+
+                    <div class="custom-file-name">
+                        {html_escape(self_file.name)}
+                    </div>
+
+                    <div class="custom-file-description">
+                        Self Assessment
+                    </div>
+
+                </div>
+
+                <div class="custom-file-check">
+                    ✓
+                </div>
+
+            </div>
+            """
+        )
+
+
+        # ----------------------------------------------------
+        # CHANGE FILE
+        # ----------------------------------------------------
+
+        with st.container(
+            key="change_self_file"
+        ):
+
+            change_self = st.button(
+
+                "Change file",
+
+                key=(
+                    "change_self_file_"
+                    f"{st.session_state.self_file_version}"
+                )
+
+            )
+
+
+        if change_self:
+
+            clear_uploaded_file(
+                "self"
+            )
+
+            st.session_state.processed_data = None
+
+            st.session_state.generated_file = None
+
+            st.session_state.generated_employee = None
+
+            st.session_state.generated_zip = None
+
+            st.session_state.mapping_counts = {}
+
+            st.session_state.self_file_version += 1
+
+            st.rerun()
+
+
+    # ========================================================
+    # SUPERIOR ASSESSMENT LABEL
+    # ========================================================
+
+    render_html(
+        """
+        <div class="learning-section-label">
+
+            <div class="people-icon"></div>
+
+            <span>
+                Superior Assessment
+            </span>
+
+        </div>
+        """
+    )
+
+
+    # ========================================================
+    # SUPERIOR FILE
+    # ========================================================
+
+    superior_file = get_stored_file(
+        "superior"
+    )
+
+
+    if superior_file is None:
+
+        superior_widget_key = (
+            "superior_file_"
+            f"{st.session_state.superior_file_version}"
+        )
+
+        with st.container(
+            key="superior_upload_zone"
+        ):
+
+            # ------------------------------------------------
+            # CUSTOM EMPTY CARD
+            # ------------------------------------------------
+
+            render_html(
+                """
+                <div class="custom-empty-upload-card">
+
+                    <div class="upload-icon-box">
+
+                        <div class="upload-arrow"></div>
+
+                    </div>
+
+                    <div class="upload-text-area">
+
+                        <div class="upload-primary-text">
+                            Choose File
+                        </div>
+
+                        <div class="upload-secondary-text">
+                            Excel file (.xlsx)
+                        </div>
+
+                    </div>
+
+                    <div class="upload-file-icon"></div>
+
+                </div>
+                """
+            )
+
+
+            # ------------------------------------------------
+            # INVISIBLE NATIVE UPLOADER
+            # ------------------------------------------------
+
+            with st.container(
+                key="superior_native_uploader"
+            ):
+
+                uploaded_superior = st.file_uploader(
+
+                    "Superior Assessment",
+
+                    type=[
+                        "xlsx"
+                    ],
+
+                    key=
+                        superior_widget_key,
+
+                    label_visibility=
+                        "collapsed"
+
+                )
+
+
+        # ----------------------------------------------------
+        # STORE FILE
+        # ----------------------------------------------------
+
+        if uploaded_superior is not None:
+
+            store_uploaded_file(
+                "superior",
+                uploaded_superior
+            )
+
+            st.rerun()
+
+
+    else:
+
+        # ----------------------------------------------------
+        # UPLOADED FILE CARD
+        # ----------------------------------------------------
+
+        render_html(
+            f"""
+            <div class="custom-uploaded-file">
+
+                <div class="custom-file-badge">
+                    XLS
+                </div>
+
+                <div class="custom-file-info">
+
+                    <div class="custom-file-name">
+                        {html_escape(superior_file.name)}
+                    </div>
+
+                    <div class="custom-file-description">
+                        Superior Assessment
+                    </div>
+
+                </div>
+
+                <div class="custom-file-check">
+                    ✓
+                </div>
+
+            </div>
+            """
+        )
+
+
+        # ----------------------------------------------------
+        # CHANGE FILE
+        # ----------------------------------------------------
+
+        with st.container(
+            key="change_superior_file"
+        ):
+
+            change_superior = st.button(
+
+                "Change file",
+
+                key=(
+                    "change_superior_file_"
+                    f"{st.session_state.superior_file_version}"
+                )
+
+            )
+
+
+        if change_superior:
+
+            clear_uploaded_file(
+                "superior"
+            )
+
+            st.session_state.processed_data = None
+
+            st.session_state.generated_file = None
+
+            st.session_state.generated_employee = None
+
+            st.session_state.generated_zip = None
+
+            st.session_state.mapping_counts = {}
+
+            st.session_state.superior_file_version += 1
+
+            st.rerun()
+
+
+    # ========================================================
+    # GENERATE REPORT
+    # ========================================================
+
+    with st.container(
+        key="generate_report"
+    ):
+
+        generate_report = st.button(
+
+            "✦  Generate Report",
+
+            type="primary",
+
+            use_container_width=True
+
+        )
+
+
+    # ========================================================
+    # NOTE
+    # ========================================================
+
+    render_html(
+        """
+        <div class="learning-security-note">
+
+            ♢&nbsp;&nbsp;
+            Pastikan kedua file berformat Excel (.xlsx)
+
+        </div>
+        """
+    )
+
+
+# ============================================================
+# PROCESS / VALIDATE
+# ============================================================
+
+if generate_report:
+
+    # ========================================================
+    # CHECK MASTER
+    # ========================================================
+
+    if not MASTER_FILE.exists():
+
+        st.error(
+            "Master Template tidak ditemukan "
+            "di folder data/master/."
+        )
+
+    # ========================================================
+    # CHECK USER FILES
+    # ========================================================
+
+    elif (
+        self_file is None
+        or superior_file is None
+    ):
+
+        st.error(
+            "Upload Self Assessment dan "
+            "Superior Assessment terlebih dahulu."
+        )
+
+    else:
+
+        with st.spinner(
+            "Generating Learning Agility Report..."
+        ):
+
+            try:
+
+                # ==============================================
+                # RESET BUFFER
+                # ==============================================
+
+                self_file.seek(0)
+
+                superior_file.seek(0)
+
+                # ==============================================
+                # PROCESS
+                # ==============================================
+
+                result = process_files(
+
+                    master_file=
+                        MASTER_FILE,
+
+                    self_file=
+                        self_file,
+
+                    superior_file=
+                        superior_file
+
+                )
+
+                # ==============================================
+                # STORE
+                # ==============================================
+
+                st.session_state.processed_data = (
+                    result
+                )
+
+                st.session_state.generated_file = (
+                    None
+                )
+
+                st.session_state.generated_employee = (
+                    None
+                )
+
+                st.session_state.generated_zip = (
+                    None
+                )
+
+                # ==============================================
+                # MAPPING STATUS
+                # ==============================================
+
+                mapping_counts = (
+                    result[
+                        "scored_answers_df"
+                    ][
+                        "mapping_status"
+                    ]
+                    .value_counts()
+                    .to_dict()
+                )
+
+                st.session_state.mapping_counts = (
+                    mapping_counts
+                )
+
+                st.success(
+                    "Assessment berhasil diproses."
+                )
+
+            except Exception as e:
+
+                st.session_state.processed_data = (
+                    None
+                )
+
+                st.session_state.generated_file = (
+                    None
+                )
+
+                st.session_state.generated_employee = (
+                    None
+                )
+
+                st.session_state.generated_zip = (
+                    None
+                )
+
+                st.session_state.mapping_counts = {}
+
+                st.error(
+                    f"Proses gagal: {e}"
+                )
+
+
+# ============================================================
+# RESULT / GENERATION AREA
+# ============================================================
+
+if (
+    st.session_state.processed_data
+    is not None
+):
+
+    data = (
+        st.session_state.processed_data
+    )
+
+    employees = (
+        data[
+            "employees"
+        ]
+    )
+
+    scored_answers_df = (
+        data[
+            "scored_answers_df"
+        ]
+    )
+
+
+    # ========================================================
+    # MAPPING WARNINGS
+    # ========================================================
+
+    mapping_counts = (
+        st.session_state.get(
+            "mapping_counts",
+            {}
+        )
+    )
+
+
+    if (
+        mapping_counts.get(
+            "ANSWER_NOT_FOUND",
+            0
+        )
+        > 0
+    ):
+
+        st.warning(
+            "Ada jawaban yang tidak cocok "
+            "dengan level 1–5 pada Master."
+        )
+
+
+    if (
+        mapping_counts.get(
+            "QUESTION_NOT_FOUND",
+            0
+        )
+        > 0
+    ):
+
+        st.warning(
+            "Ada question yang tidak ditemukan "
+            "pada Master."
+        )
+
+
+    # ========================================================
+    # GENERATE EMPLOYEE CARD
+    # ========================================================
+
+    render_html(
+        """
+        <div class="learning-result-card">
+
+            <div class="learning-result-title">
+                Generate Employee Report
+            </div>
+
+            <div class="learning-result-description">
+                Pilih employee untuk membuat report
+                individual atau generate seluruh employee.
+            </div>
+
+        </div>
+        """
+    )
+
+
+    # ========================================================
+    # EMPLOYEE SELECT
+    # ========================================================
+
+    selected_employee = st.selectbox(
+
+        "Pilih Employee",
+
+        employees
+
+    )
+
+
+    # ========================================================
+    # GENERATE BUTTONS
+    # ========================================================
+
+    col_generate_one, col_generate_all = (
+        st.columns(2)
+    )
+
+
+    # ========================================================
+    # GENERATE ONE EMPLOYEE
+    # ========================================================
+
+    with col_generate_one:
+
+        if st.button(
+
+            "Generate Excel",
+
+            type="primary",
+
+            use_container_width=True
+
+        ):
+
+            with st.spinner(
+
+                f"Membuat file untuk "
+                f"{selected_employee}..."
+
+            ):
+
+                try:
+
+                    OUTPUT_DIR.mkdir(
+                        parents=True,
+                        exist_ok=True
                     )
 
-            st.dataframe(
-                gap_df,
-                use_container_width=True,
-            )
+                    output_file = (
+                        create_employee_file(
 
-    except Exception as exc:
+                            employee_name=
+                                selected_employee,
 
-        progress_bar.empty()
+                            master_file=
+                                MASTER_FILE,
 
-        status_box.error(
-            "Processing gagal."
-        )
+                            df_self=
+                                data[
+                                    "df_self"
+                                ],
 
-        st.exception(exc)
+                            df_superior=
+                                data[
+                                    "df_superior"
+                                ],
+
+                            scored_answers=
+                                scored_answers_df,
+
+                            output_dir=
+                                OUTPUT_DIR
+
+                        )
+                    )
+
+                    st.session_state.generated_file = (
+                        output_file
+                    )
+
+                    st.session_state.generated_employee = (
+                        selected_employee
+                    )
+
+                    st.session_state.generated_zip = (
+                        None
+                    )
+
+                    st.success(
+                        "Excel berhasil dibuat untuk "
+                        f"{selected_employee}."
+                    )
+
+                except Exception as e:
+
+                    st.session_state.generated_file = (
+                        None
+                    )
+
+                    st.error(
+                        f"Gagal membuat Excel: {e}"
+                    )
+
+
+    # ========================================================
+    # GENERATE ALL EMPLOYEES
+    # ========================================================
+
+    with col_generate_all:
+
+        if st.button(
+
+            "Generate All Employees",
+
+            use_container_width=True
+
+        ):
+
+            with st.spinner(
+
+                f"Membuat {len(employees)} "
+                "file employee..."
+
+            ):
+
+                try:
+
+                    OUTPUT_DIR.mkdir(
+                        parents=True,
+                        exist_ok=True
+                    )
+
+                    (
+                        zip_file,
+                        generated_files
+                    ) = (
+                        create_all_employee_files(
+
+                            employees=
+                                employees,
+
+                            master_file=
+                                MASTER_FILE,
+
+                            df_self=
+                                data[
+                                    "df_self"
+                                ],
+
+                            df_superior=
+                                data[
+                                    "df_superior"
+                                ],
+
+                            scored_answers=
+                                scored_answers_df,
+
+                            output_dir=
+                                OUTPUT_DIR
+
+                        )
+                    )
+
+                    st.session_state.generated_zip = (
+                        zip_file
+                    )
+
+                    st.session_state.generated_file = (
+                        None
+                    )
+
+                    st.session_state.generated_employee = (
+                        None
+                    )
+
+                    st.success(
+                        f"{len(generated_files)} "
+                        "file employee berhasil dibuat "
+                        "dan dikumpulkan ke dalam ZIP."
+                    )
+
+                except Exception as e:
+
+                    st.session_state.generated_zip = (
+                        None
+                    )
+
+                    st.error(
+                        f"Gagal membuat seluruh file: {e}"
+                    )
 
 
 # ============================================================
-# FOOTER
+# DOWNLOAD ONE EMPLOYEE
 # ============================================================
 
-st.divider()
+if (
+    st.session_state.generated_file
+    is not None
+    and st.session_state.generated_file.exists()
+):
 
-st.caption(
-    "Learning Agility Assessment System — "
-    "Python + Streamlit + Pandas + OpenPyXL"
-)
-'''
+    output_file = (
+        st.session_state.generated_file
+    )
 
-out = Path("/mnt/data/app.py")
-out.write_text(app_code, encoding="utf-8")
 
-# Syntax validation
-import py_compile
-py_compile.compile(str(out), doraise=True)
+    # ========================================================
+    # RESULT CARD
+    # ========================================================
 
-print(f"Created: {out}")
-print(f"Lines: {len(app_code.splitlines())}")
-print("Syntax check: PASSED")
+    render_html(
+        """
+        <div class="learning-result-card">
+
+            <div class="learning-result-title">
+                Download Employee Report
+            </div>
+
+            <div class="learning-result-description">
+                File employee berhasil dibuat
+                dan siap untuk di-download.
+            </div>
+
+        </div>
+        """
+    )
+
+
+    # ========================================================
+    # READ FILE
+    # ========================================================
+
+    with open(
+        output_file,
+        "rb"
+    ) as f:
+
+        file_bytes = f.read()
+
+
+    # ========================================================
+    # DOWNLOAD
+    # ========================================================
+
+    st.download_button(
+
+        label=(
+            f"Download "
+            f"{output_file.name}"
+        ),
+
+        data=
+            file_bytes,
+
+        file_name=
+            output_file.name,
+
+        mime=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+
+        use_container_width=True
+
+    )
+
+
+# ============================================================
+# DOWNLOAD ALL EMPLOYEES ZIP
+# ============================================================
+
+if (
+    st.session_state.generated_zip
+    is not None
+    and st.session_state.generated_zip.exists()
+):
+
+    zip_file = (
+        st.session_state.generated_zip
+    )
+
+
+    # ========================================================
+    # RESULT CARD
+    # ========================================================
+
+    render_html(
+        """
+        <div class="learning-result-card">
+
+            <div class="learning-result-title">
+                Download All Employees
+            </div>
+
+            <div class="learning-result-description">
+                Seluruh employee report berhasil dibuat
+                dan sudah dikumpulkan dalam satu ZIP.
+            </div>
+
+        </div>
+        """
+    )
+
+
+    # ========================================================
+    # READ ZIP
+    # ========================================================
+
+    with open(
+        zip_file,
+        "rb"
+    ) as f:
+
+        zip_bytes = f.read()
+
+
+    # ========================================================
+    # DOWNLOAD ZIP
+    # ========================================================
+
+    st.download_button(
+
+        label=
+            "Download All Employees (.ZIP)",
+
+        data=
+            zip_bytes,
+
+        file_name=
+            zip_file.name,
+
+        mime=
+            "application/zip",
+
+        use_container_width=True
+
+    )

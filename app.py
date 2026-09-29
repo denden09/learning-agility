@@ -10,7 +10,7 @@
 #
 # Excel output:
 #   - Master is copied first
-#   - Values are written using Microsoft Excel COM
+#   - Values are written using openpyxl (server-friendly)
 #   - Original Master is never edited
 #
 # Background:
@@ -75,6 +75,12 @@ OUTPUT_DIR = (
     BASE_DIR
     / "generated"
 )
+
+
+# Excel generation uses openpyxl, so the app does not require:
+#   - Microsoft Excel
+#   - pywin32
+#   - Windows COM automation
 
 
 # ============================================================
@@ -1610,7 +1616,13 @@ def prepare_employee_values(
 
 
 # ============================================================
-# WRITE VALUES USING MICROSOFT EXCEL COM
+# WRITE VALUES USING OPENPYXL
+# ============================================================
+#
+# NOTE:
+# This replaces the previous Microsoft Excel COM implementation.
+# It works on Linux/Streamlit deployments because it does not
+# require Microsoft Excel or pywin32.
 # ============================================================
 
 def write_values_with_excel(
@@ -1618,77 +1630,44 @@ def write_values_with_excel(
     employee_values
 ):
 
-    try:
-
-        import pythoncom
-        import win32com.client as win32
-
-    except ImportError:
-
-        raise ImportError(
-            "Library pywin32 belum terinstall.\n\n"
-            "Install dengan:\n"
-            "pip install pywin32"
-        )
-
-    excel = None
     workbook = None
 
-    # ========================================================
-    # INITIALIZE COM
-    # ========================================================
-
-    pythoncom.CoInitialize()
-
     try:
-
-        # ====================================================
-        # START EXCEL
-        # ====================================================
-
-        excel = win32.DispatchEx(
-            "Excel.Application"
-        )
-
-        excel.Visible = False
-        excel.DisplayAlerts = False
-
-        try:
-
-            excel.AskToUpdateLinks = False
-
-        except Exception:
-
-            pass
 
         # ====================================================
         # OPEN COPIED MASTER
         # ====================================================
 
-        workbook = excel.Workbooks.Open(
-            str(
-                output_file.resolve()
-            )
+        workbook = load_workbook(
+            output_file,
+            data_only=False
         )
 
         # ====================================================
         # IDENTITAS
         # ====================================================
 
-        ws_identity = workbook.Worksheets(
-            "Identitas"
-        )
+        if "Identitas" not in workbook.sheetnames:
+
+            raise ValueError(
+                "Sheet 'Identitas' tidak ditemukan pada Master."
+            )
+
+        ws_identity = workbook["Identitas"]
 
         for (
             cell_address,
             value
-        ) in employee_values[
-            "Identitas"
-        ].items():
+        ) in employee_values.get(
+            "Identitas",
+            {}
+        ).items():
 
-            ws_identity.Range(
-                cell_address
-            ).Value = value
+            # Convert numpy scalar values to normal Python values.
+            if isinstance(value, np.generic):
+                value = value.item()
+
+            ws_identity[cell_address] = value
 
         # ====================================================
         # 5 DIMENSIONS
@@ -1696,15 +1675,17 @@ def write_values_with_excel(
 
         for sheet_name in ASSESSMENT_SHEETS:
 
-            worksheet = workbook.Worksheets(
-                sheet_name
-            )
+            if sheet_name not in workbook.sheetnames:
 
-            sheet_values = (
-                employee_values.get(
-                    sheet_name,
-                    {}
+                raise ValueError(
+                    f"Sheet '{sheet_name}' tidak ditemukan pada Master."
                 )
+
+            worksheet = workbook[sheet_name]
+
+            sheet_values = employee_values.get(
+                sheet_name,
+                {}
             )
 
             for (
@@ -1712,69 +1693,33 @@ def write_values_with_excel(
                 value
             ) in sheet_values.items():
 
-                worksheet.Range(
-                    cell_address
-                ).Value = value
+                # Convert numpy scalar values to normal Python values.
+                if isinstance(value, np.generic):
+                    value = value.item()
+
+                worksheet[cell_address] = value
 
         # ====================================================
         # SAVE
         # ====================================================
 
-        workbook.Save()
+        workbook.save(output_file)
 
     except Exception as e:
 
         raise RuntimeError(
-            "Gagal menulis data ke Excel.\n\n"
-            f"Detail: {e}\n\n"
-            "Pastikan Microsoft Excel terinstall "
-            "dan file Master tidak sedang dibuka "
-            "dengan mode yang mengunci file."
+            "Gagal menulis data ke Excel menggunakan openpyxl.\n\n"
+            f"Detail: {e}"
         ) from e
 
     finally:
 
-        # ====================================================
-        # CLOSE WORKBOOK
-        # ====================================================
-
         if workbook is not None:
 
             try:
-
-                workbook.Close(
-                    SaveChanges=False
-                )
-
+                workbook.close()
             except Exception:
-
                 pass
-
-        # ====================================================
-        # QUIT EXCEL
-        # ====================================================
-
-        if excel is not None:
-
-            try:
-
-                excel.Quit()
-
-            except Exception:
-
-                pass
-
-        # ====================================================
-        # UNINITIALIZE COM
-        # ====================================================
-
-        try:
-
-            pythoncom.CoUninitialize()
-
-        except Exception:
-
-            pass
 
 
 # ============================================================
@@ -1945,7 +1890,7 @@ def create_employee_file(
     )
 
     # ========================================================
-    # STEP 3 — WRITE USING EXCEL COM
+    # STEP 3 — WRITE USING OPENPYXL
     # ========================================================
 
     write_values_with_excel(

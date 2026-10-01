@@ -1,31 +1,3 @@
-# ============================================================
-# app.py — LEARNING AGILITY ASSESSMENT
-#
-# Master Template:
-#   bundled inside application
-#
-# User uploads:
-#   1. Self Assessment
-#   2. Superior Assessment
-#
-# Excel output:
-#   - Master is copied first
-#   - Values are written DIRECTLY into the XLSX XML package
-#     (cross-platform, no Microsoft Excel / pywin32 needed)
-#   - Styles, charts, images, merges, validations of the
-#     Master are preserved (openpyxl.save is NOT used)
-#   - Formulas are recalculated automatically when opened
-#     in Excel (fullCalcOnLoad)
-#   - Original Master is never edited
-#
-# Background:
-#   public/abstract-orange-bg.png
-#
-# Output:
-#   - Individual Excel
-#   - All Employees ZIP
-# ============================================================
-
 import base64
 import io
 import math
@@ -122,7 +94,10 @@ ASSESSMENT_INPUT_COLUMNS = {
     "superior_comment": 12,
 }
 
-ASSESSMENT_ROWS = list(range(13, 23))
+# Row 13 is the first assessment row in every dimension sheet.
+# The number of questions is NOT fixed: the Master workbook is the source
+# of truth, so each sheet may have a different number of indicators.
+ASSESSMENT_START_ROW = 13
 
 ASSESSMENT_SHEETS = list(DIMENSIONS.values())
 
@@ -285,10 +260,24 @@ def read_master_indicators(master_file):
 
             ws = master_wb[sheet_name]
 
-            for indicator_no, row in enumerate(range(13, 23), start=1):
+            # Read every populated indicator row from the Master.
+            # Do not hardcode 10 questions per dimension.
+            for row in range(ASSESSMENT_START_ROW, ws.max_row + 1):
 
                 indicator = ws.cell(row, 2).value
                 question = ws.cell(row, 3).value
+
+                # A completely empty row is not an indicator.
+                if clean_value(indicator) == "" and clean_value(question) == "":
+                    continue
+
+                if clean_value(question) == "":
+                    raise ValueError(
+                        f"Sheet '{sheet_name}' row {row}: "
+                        "Indicator terisi tetapi Question kosong."
+                    )
+
+                indicator_no = row - ASSESSMENT_START_ROW + 1
 
                 levels = {
                     1: ws.cell(row, 4).value,
@@ -302,6 +291,7 @@ def read_master_indicators(master_file):
                     "dimension": dimension_key,
                     "sheet_name": sheet_name,
                     "indicator_no": indicator_no,
+                    "master_row": row,
                     "indicator_id": f"{dimension_key}_{indicator_no:02d}",
                     "indicator": indicator,
                     "question": question,
@@ -324,20 +314,21 @@ def read_master_indicators(master_file):
 
     indicator_master_df = pd.DataFrame(indicator_master)
 
-    if len(indicator_master_df) != 50:
+    expected_question_count = len(indicator_master_df)
 
+    if expected_question_count == 0:
         raise ValueError(
-            "Master harus memiliki 50 indikator. "
-            f"Ditemukan {len(indicator_master_df)}."
+            "Tidak ada indikator yang ditemukan pada Master. "
+            f"Pastikan data dimulai dari row {ASSESSMENT_START_ROW}."
         )
 
-    if indicator_master_df["indicator_id"].nunique() != 50:
+    if indicator_master_df["indicator_id"].nunique() != expected_question_count:
 
         raise ValueError(
             "Terdapat duplicate indicator_id pada Master."
         )
 
-    if indicator_master_df["question_normalized"].nunique() != 50:
+    if indicator_master_df["question_normalized"].nunique() != expected_question_count:
 
         raise ValueError(
             "Terdapat duplicate question pada Master."
@@ -560,6 +551,7 @@ def prepare_employee_values(
     scored_answers,
     df_self,
     df_superior,
+    indicator_master_df,
 ):
 
     target_employee = normalize_text(employee_name)
@@ -708,9 +700,20 @@ def prepare_employee_values(
             employee_data["dimension"] == dimension_key
         ].copy()
 
-        for indicator_no, row in enumerate(ASSESSMENT_ROWS, start=1):
+        # Use the actual indicator rows from the Master for this dimension.
+        # This supports different question counts per sheet, e.g.
+        # People Agility = 16 and Result Agility = 12.
+        dimension_master = (
+            indicator_master_df[
+                indicator_master_df["dimension"] == dimension_key
+            ]
+            .sort_values("indicator_no")
+        )
 
-            indicator_id = f"{dimension_key}_{indicator_no:02d}"
+        for _, master_row in dimension_master.iterrows():
+
+            indicator_id = master_row["indicator_id"]
+            row = int(master_row["master_row"])
 
             indicator_data = dimension_data[
                 dimension_data["indicator_id"] == indicator_id
@@ -1366,6 +1369,7 @@ def create_employee_file(
     df_self,
     df_superior,
     scored_answers,
+    indicator_master_df,
     output_dir,
 ):
 
@@ -1393,6 +1397,7 @@ def create_employee_file(
         scored_answers=scored_answers,
         df_self=df_self,
         df_superior=df_superior,
+        indicator_master_df=indicator_master_df,
     )
 
     # ========================================================
@@ -1443,6 +1448,7 @@ def create_all_employee_files(
     df_self,
     df_superior,
     scored_answers,
+    indicator_master_df,
     output_dir,
 ):
 
@@ -1458,6 +1464,7 @@ def create_all_employee_files(
             df_self=df_self,
             df_superior=df_superior,
             scored_answers=scored_answers,
+            indicator_master_df=indicator_master_df,
             output_dir=output_dir,
         )
 
@@ -1537,20 +1544,46 @@ def process_files(master_file, self_file, superior_file):
         master_questions,
     )
 
-    if len(self_question_cols) != 50:
+    expected_question_count = len(indicator_master_df)
+
+    if len(self_question_cols) != expected_question_count:
 
         raise ValueError(
             "Self raw contains "
             f"{len(self_question_cols)} questions. "
-            "Expected 50."
+            f"Expected {expected_question_count} based on Master."
         )
 
-    if len(superior_question_cols) != 50:
+    if len(superior_question_cols) != expected_question_count:
 
         raise ValueError(
             "Superior raw contains "
             f"{len(superior_question_cols)} questions. "
-            "Expected 50."
+            f"Expected {expected_question_count} based on Master."
+        )
+
+    # Ensure every Master question exists in both RAW exports.
+    # detect_question_columns() already matches by normalized question text,
+    # so this also catches missing/new questions without relying on column order.
+    master_question_set = set(indicator_master_df["question_normalized"])
+    self_question_set = {normalize_text(q) for q in self_question_cols}
+    superior_question_set = {normalize_text(q) for q in superior_question_cols}
+
+    missing_self = sorted(master_question_set - self_question_set)
+    missing_superior = sorted(master_question_set - superior_question_set)
+
+    if missing_self:
+        raise ValueError(
+            "Ada question Master yang tidak ditemukan di Self RAW: "
+            + "; ".join(missing_self[:5])
+            + (" ..." if len(missing_self) > 5 else "")
+        )
+
+    if missing_superior:
+        raise ValueError(
+            "Ada question Master yang tidak ditemukan di Superior RAW: "
+            + "; ".join(missing_superior[:5])
+            + (" ..." if len(missing_superior) > 5 else "")
         )
 
     answer_mapping = build_answer_mapping(indicator_master_df)
@@ -2463,6 +2496,7 @@ if st.session_state.processed_data is not None:
                         df_self=data["df_self"],
                         df_superior=data["df_superior"],
                         scored_answers=scored_answers_df,
+                        indicator_master_df=data["indicator_master_df"],
                         output_dir=OUTPUT_DIR,
                     )
 
@@ -2504,6 +2538,7 @@ if st.session_state.processed_data is not None:
                         df_self=data["df_self"],
                         df_superior=data["df_superior"],
                         scored_answers=scored_answers_df,
+                        indicator_master_df=data["indicator_master_df"],
                         output_dir=OUTPUT_DIR,
                     )
 

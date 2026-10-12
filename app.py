@@ -41,7 +41,7 @@ MASTER_FILE = (
     BASE_DIR
     / "data"
     / "master"
-    / "Learning agility self assesment & superior_01.10.2026 1.xlsx"
+    / "KompetensixLearning agility assesment..xlsx"
 )
 
 OUTPUT_DIR = BASE_DIR / "generated"
